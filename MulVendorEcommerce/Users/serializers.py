@@ -10,6 +10,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         token = super().get_token(user)
         token['role'] = user.role
         return token
+    
 # User Serializer for the User model
 # This serializer is used to serialize user data, including custom fields like phone number and role.
 class UserSerializer(serializers.ModelSerializer):

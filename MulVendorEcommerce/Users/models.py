@@ -83,7 +83,7 @@ class User(AbstractBaseUser):
             return self.customer.first_name
         return self.username
 
-
+# This models used to Sore the Customer data 
 class Customer(models.Model):
     """
     Extended profile for customers with personal information.
@@ -108,7 +108,7 @@ class Customer(models.Model):
         """Return the customer's full name."""
         return f"{self.first_name} {self.last_name}".strip()
 
-
+# This model is used to manage vendor profiles with business information.
 class Vendor(models.Model):
     """
     Extended profile for vendors with business information.
@@ -129,7 +129,7 @@ class Vendor(models.Model):
         ordering = ['-is_approved', 'store_name']
     def __str__(self):
         return f"{self.store_name} ({self.user.email})"
-    
+# this model is used to manage admin users with specific access levels and permissions.
 class AdminProfile(models.Model):
     """
     Extended profile for admin users with additional access control.
@@ -150,8 +150,7 @@ class AdminProfile(models.Model):
 
     def __str__(self):
         return f"{self.get_access_level_display()} ({self.user.email})"
-
-
+# This model is used to manage vendor employees with specific roles and permissions.
 class VendorEmployee(models.Model):
     """
     Model representing employees working for vendors with specific permissions.
@@ -180,7 +179,6 @@ class VendorEmployee(models.Model):
         ordering = ['vendor', '-is_active', 'role']
     def __str__(self):
         return f"{self.user.username} ({self.get_role_display()} at {self.vendor.store_name})"
-
 
 class Address(models.Model):
     """
@@ -213,7 +211,6 @@ class Address(models.Model):
 
     def __str__(self):
         return f"{self.get_label_display()} address for {self.user.username}"
-
     def save(self, *args, **kwargs):
         # Ensure only one default address per user
         if self.is_default:

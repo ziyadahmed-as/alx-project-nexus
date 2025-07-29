@@ -16,9 +16,10 @@ This repository documents my professional backend development expertise for scal
 - Role-based access control (RBAC) for:
   - Super Admin
   - Vendors
+  - VendorsEmploye
   - Customers
   - Delivery Partners
-- Custom storefront configuration per vendor
+- configuration per vendor
 
 ### Inventory & Logistics
 - Distributed inventory management

@@ -1,8 +1,10 @@
 import uuid
+
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
 from django.db import models
 from django.utils.translation import gettext_lazy as _
-
+from django.contrib.auth.models import AbstractUser
+ 
 class UserManager(BaseUserManager):
     """Custom user manager for handling user creation"""
     def create_user(self, email, username, password=None, **extra_fields):
@@ -26,61 +28,73 @@ class UserManager(BaseUserManager):
         if extra_fields.get('is_superuser') is not True:
             raise ValueError(_('Superuser must have is_superuser=True.'))  
         return self.create_user(email, username, password, **extra_fields)
+# User models 
+import uuid
+from django.contrib.auth.models import AbstractUser, Group, Permission
+from django.db import models
+from django.utils.translation import gettext_lazy as _
 
-class User(AbstractBaseUser):
-    """
-    Custom user model serving as the base for all user types in the system.
-    Uses email as the primary identifier instead of username.
-    """
+class User(AbstractUser):
     class Role(models.TextChoices):
         ADMIN = 'ADMIN', _('Admin')
         CUSTOMER = 'CUSTOMER', _('Customer')
         VENDOR = 'VENDOR', _('Vendor')
-        GUEST = 'GUEST', _('Guest')
-    
-    id = models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False,verbose_name=_('ID'))    
-    email = models.EmailField( unique=True, verbose_name=_('email address'), error_messages={
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        verbose_name=_('ID')
+    )
+    email = models.EmailField(
+        unique=True,
+        verbose_name=_('email address'),
+        error_messages={
             'unique': _("A user with that email already exists."),
         }
     )
-    username = models.CharField(max_length=150,unique=True,verbose_name=_('username'),
-        help_text=_('Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only.'),
-        error_messages={
-            'unique': _("A user with that username already exists."),
-        }
+    phone_number = models.CharField(
+        max_length=15,
+        blank=True,
+        null=True,
+        verbose_name=_('phone number')
     )
-    phone_number = models.CharField(max_length=15,blank=True,null=True,verbose_name=_('phone number'))
-    role = models.CharField(max_length=20,choices=Role.choices,default=Role.GUEST,verbose_name=_('role'))
-    is_verified = models.BooleanField( default=False,verbose_name=_('verified status'), is_active = models.BooleanField(default=True,verbose_name=_('active'),  is_staff = models.BooleanField( default=False, verbose_name=_('staff status') )))
-    date_joined = models.DateTimeField( auto_now_add=True, verbose_name=_('date joined'))
-    updated_at = models.DateTimeField(auto_now=True,verbose_name=_('last updated'))
-    objects = UserManager()
-    USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = ['username']
+    is_verified = models.BooleanField(
+        default=False,
+        verbose_name=_('verified status')
+    )
+    role = models.CharField(
+        max_length=20,
+        choices=Role.choices,
+        default=Role.CUSTOMER,
+        verbose_name=_('role')
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name=_('last updated')
+    )
 
-    class Meta:
-        verbose_name = _('user')
-        verbose_name_plural = _('users')
-        ordering = ['-date_joined']
+    groups = models.ManyToManyField(
+        Group,
+        related_name='custom_user_set',
+        blank=True,
+        help_text=_(
+            'The groups this user belongs to. A user will get all permissions '
+            'granted to each of their groups.'
+        ),
+        verbose_name=_('groups')
+    )
+    user_permissions = models.ManyToManyField(
+        Permission,
+        related_name='custom_user_set',
+        blank=True,
+        help_text=_('Specific permissions for this user.'),
+        verbose_name=_('user permissions')
+    )
+
+    REQUIRED_FIELDS = ['email']
 
     def __str__(self):
-        return self.username
-
-    def clean(self):
-        super().clean()
-        self.email = self.__class__.objects.normalize_email(self.email)
-
-    @property
-    def full_name(self):
-        """Return the first_name plus the last_name, with a space in between."""
-        if hasattr(self, 'customer'):
-            return f"{self.customer.first_name} {self.customer.last_name}"
-        return self.username
-
-    def get_short_name(self):
-        """Return the short name for the user."""
-        if hasattr(self, 'customer'):
-            return self.customer.first_name
         return self.username
 
 # This models used to Sore the Customer data 
@@ -216,3 +230,4 @@ class Address(models.Model):
         if self.is_default:
             self.__class__.objects.filter(user=self.user, is_default=True).update(is_default=False)
         super().save(*args, **kwargs)
+        

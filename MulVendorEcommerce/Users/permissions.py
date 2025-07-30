@@ -3,11 +3,7 @@ from rest_framework import permissions
 # User permissions for the application
 class IsSuperAdmin(permissions.BasePermission):
     def has_permission(self, request, view):
-        return (request.user.is_authenticated and 
-                request.user.role == 'ADMIN' and 
-                hasattr(request.user, 'admin_profile') and
-                request.user.admin_profile.access_level == 'SUPER')
-       
+        return request.user and request.user.is_superuser      
 # This permission allows access to admin users with super admin privileges.
 class IsVendorOwner(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):

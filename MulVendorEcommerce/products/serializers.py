@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import Category, Product, ProductImage, ProductReview, ProductVariant, VendorProductRelation
 from vendors.models import VendorDashboard
-from users.serializers import VendorSerializer, UserSerializer
+from Users.serializers import VendorSerializer, UserSerializer
 from django.utils.text import slugify
 
 class CategorySerializer(serializers.ModelSerializer):

@@ -1,7 +1,10 @@
-from rest_framework import generics, status, permissions
+# users/views.py
+
+from rest_framework import generics, status, permissions, serializers
 from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView, TokenVerifyView
 from django.shortcuts import get_object_or_404
+
 from .models import User, Customer, Vendor, AdminProfile, VendorEmployee
 from .serializers import (
     UserSerializer,
@@ -13,32 +16,41 @@ from .serializers import (
 )
 from .permissions import IsSuperAdmin, IsVendorOwner, IsProfileOwner
 
-# ====================== AUTHENTICATION ======================
+# ---------------------------
+# Authentication Views
+# ---------------------------
+
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
+
 
 class CustomTokenRefreshView(TokenRefreshView):
     pass
 
+
 class CustomTokenVerifyView(TokenVerifyView):
     pass
 
-# ====================== USER CRUD ======================
+# ---------------------------
+# User Views
+# ---------------------------
+
 class UserListCreateAPIView(generics.ListCreateAPIView):
     queryset = User.objects.all()
     serializer_class = UserSerializer
-    
+
     def get_permissions(self):
         if self.request.method == 'POST':
-            return [permissions.AllowAny()]  # Allow registration
+            return [permissions.AllowAny()]  # Allow public registration
         return [IsSuperAdmin()]  # Only superadmin can list users
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = serializer.save()
+        self.perform_create(serializer)
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
 
 class UserRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
     queryset = User.objects.all()
@@ -51,11 +63,15 @@ class UserRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
         return [permissions.IsAuthenticated()]
 
     def perform_update(self, serializer):
+        # Prevent non-superusers from modifying roles
         if 'role' in serializer.validated_data and not self.request.user.is_superuser:
-            raise serializers.ValidationError("Only admins can change user roles")
+            raise serializers.ValidationError("Only superusers can change user roles.")
         serializer.save()
 
-# ====================== CUSTOMER CRUD ======================
+# ---------------------------
+# Customer Views
+# ---------------------------
+
 class CustomerListCreateAPIView(generics.ListCreateAPIView):
     serializer_class = CustomerSerializer
 
@@ -76,12 +92,16 @@ class CustomerListCreateAPIView(generics.ListCreateAPIView):
         user = user_serializer.save(role='CUSTOMER')
         serializer.save(user=user)
 
+
 class CustomerRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Customer.objects.all()
     serializer_class = CustomerSerializer
     permission_classes = [IsProfileOwner | IsSuperAdmin]
 
-# ====================== VENDOR CRUD ======================
+# ---------------------------
+# Vendor Views
+# ---------------------------
+
 class VendorListCreateAPIView(generics.ListCreateAPIView):
     serializer_class = VendorSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -92,28 +112,37 @@ class VendorListCreateAPIView(generics.ListCreateAPIView):
         return Vendor.objects.filter(user=self.request.user)
 
     def perform_create(self, serializer):
-        if self.request.user.role != 'VENDOR':
-            self.request.user.role = 'VENDOR'
-            self.request.user.save()
-        serializer.save(user=self.request.user)
+        user = self.request.user
+        if user.role != 'VENDOR':
+            user.role = 'VENDOR'
+            user.save()
+        serializer.save(user=user)
+
 
 class VendorRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Vendor.objects.all()
     serializer_class = VendorSerializer
     permission_classes = [IsVendorOwner | IsSuperAdmin]
 
-# ====================== ADMIN PROFILE CRUD ======================
+# ---------------------------
+# Admin Profile Views
+# ---------------------------
+
 class AdminProfileListCreateAPIView(generics.ListCreateAPIView):
     queryset = AdminProfile.objects.all()
     serializer_class = AdminProfileSerializer
     permission_classes = [IsSuperAdmin]
+
 
 class AdminProfileRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
     queryset = AdminProfile.objects.all()
     serializer_class = AdminProfileSerializer
     permission_classes = [IsSuperAdmin]
 
-# ====================== VENDOR EMPLOYEE CRUD ======================
+# ---------------------------
+# Vendor Employee Views
+# ---------------------------
+
 class VendorEmployeeListCreateAPIView(generics.ListCreateAPIView):
     serializer_class = VendorEmployeeSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -130,6 +159,7 @@ class VendorEmployeeListCreateAPIView(generics.ListCreateAPIView):
             serializer.save(vendor=vendor)
         else:
             serializer.save()
+
 
 class VendorEmployeeRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
     queryset = VendorEmployee.objects.all()

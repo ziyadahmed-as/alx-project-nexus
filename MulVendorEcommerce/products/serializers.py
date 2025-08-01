@@ -1,8 +1,9 @@
 # products/serializers.py
 
 from rest_framework import serializers
-from Users.serializers import VendorSerializer, UserSerializer  # reuse if needed
+from Users.serializers import VendorProfileSerializer, UserDetailSerializer  # Using existing serializers
 from .models import Category, Product, ProductImage, ProductReview, ProductQuestion
+from Users.models import Vendor  # Import Vendor model directly
 
 # -------------------------------
 # Category Serializer 
@@ -40,7 +41,7 @@ class ProductImageSerializer(serializers.ModelSerializer):
 # this serializer handles product reviews, including user and rating
 # -------------------------------
 class ProductReviewSerializer(serializers.ModelSerializer):
-    user = serializers.StringRelatedField(read_only=True)  # Shows username or __str__
+    user = UserDetailSerializer(read_only=True)  # Using UserDetailSerializer from Users app
 
     class Meta:
         model = ProductReview
@@ -57,7 +58,7 @@ class ProductReviewSerializer(serializers.ModelSerializer):
 # this serializer handles product questions, including user and answer
 # -------------------------------
 class ProductQuestionSerializer(serializers.ModelSerializer):
-    user = serializers.StringRelatedField(read_only=True)
+    user = UserDetailSerializer(read_only=True)
     answered_at = serializers.DateTimeField(read_only=True)
 
     class Meta:
@@ -77,7 +78,12 @@ class ProductQuestionSerializer(serializers.ModelSerializer):
 # this serializer handles the product model, including vendor, category, and nested relationships
 # -------------------------------
 class ProductSerializer(serializers.ModelSerializer):
-    vendor = serializers.PrimaryKeyRelatedField(queryset=VendorSerializer.Meta.model.objects.all())
+    vendor = VendorProfileSerializer(read_only=True)  # Using VendorProfileSerializer for read operations
+    vendor_id = serializers.PrimaryKeyRelatedField(
+        queryset=Vendor.objects.all(),
+        source='vendor',
+        write_only=True
+    )
     category = serializers.PrimaryKeyRelatedField(queryset=Category.objects.all())
 
     images = ProductImageSerializer(many=True, read_only=True)
@@ -87,11 +93,12 @@ class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = [
-            'id', 'vendor', 'category', 'name', 'description', 'price', 'discount_price', 'stock',
-            'sku', 'is_approved', 'is_active', 'created_at', 'updated_at',
-            'images', 'reviews', 'questions',
+            'id', 'vendor', 'vendor_id', 'category', 'name', 'description', 
+            'price', 'discount_price', 'stock', 'sku', 'is_approved', 
+            'is_active', 'created_at', 'updated_at', 'images', 'reviews', 
+            'questions',
         ]
-        read_only_fields = ['id', 'is_approved', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'vendor', 'is_approved', 'created_at', 'updated_at']
 
     def validate(self, data):
         price = data.get('price')

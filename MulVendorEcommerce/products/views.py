@@ -25,6 +25,9 @@ class CategoryViewSet(viewsets.ModelViewSet):
 
 
 # ------------------ PRODUCT VIEWSET ------------------ #
+# This viewset handles product management for vendors and their employees.
+# It allows vendors to create, update, and delete their products,
+# and provides read access to all users.
 class ProductViewSet(viewsets.ModelViewSet):
     serializer_class = ProductSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]

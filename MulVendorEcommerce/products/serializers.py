@@ -1,149 +1,108 @@
-from rest_framework import serializers
-from .models import Category, Product, ProductImage, ProductReview, ProductVariant, VendorProductRelation
-from vendors.models import VendorDashboard
-from Users.serializers import VendorSerializer, UserSerializer
-from django.utils.text import slugify
+# products/serializers.py
 
+from rest_framework import serializers
+from Users.serializers import VendorProfileSerializer, UserDetailSerializer  # Using existing serializers
+from .models import Category, Product, ProductImage, ProductReview, ProductQuestion
+from Users.models import Vendor  # Import Vendor model directly
+
+# -------------------------------
+# Category Serializer 
+# this serializer handles the category model, including nested subcategories
+# -------------------------------   
 class CategorySerializer(serializers.ModelSerializer):
-    parent = serializers.PrimaryKeyRelatedField(queryset=Category.objects.all(), required=False, allow_null=True)
-    
+    subcategories = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = Category
-        fields = ['id', 'name', 'slug', 'description', 'parent', 'is_active']
-        read_only_fields = ['id', 'slug']
-        extra_kwargs = {
-            'name': {'required': True}
-        }
+        fields = ['id', 'name', 'description', 'parent_category', 'slug', 'subcategories']
+        read_only_fields = ['slug']
 
-    def validate(self, data):
-        if data.get('parent') and data['parent'] == self.instance:
-            raise serializers.ValidationError("A category cannot be its own parent")
-        return data
+    def get_subcategories(self, obj):
+        # Nested subcategories serialization
+        children = obj.subcategories.all()
+        return CategorySerializer(children, many=True).data
 
-    def create(self, validated_data):
-        if 'slug' not in validated_data:
-            validated_data['slug'] = slugify(validated_data['name'])
-        return super().create(validated_data)
-
-class RecursiveCategorySerializer(serializers.Serializer):
-    def to_representation(self, value):
-        serializer = self.parent.parent.__class__(value, context=self.context)
-        return serializer.data
-
-class CategoryTreeSerializer(CategorySerializer):
-    children = RecursiveCategorySerializer(many=True, read_only=True)
-
-    class Meta(CategorySerializer.Meta):
-        fields = CategorySerializer.Meta.fields + ['children']
-
+# -------------------------------
+# Product Image Serializer
+# this serializer handles product images, including main image and alt text
+# -------------------------------   
 class ProductImageSerializer(serializers.ModelSerializer):
-    image_url = serializers.SerializerMethodField()
-
     class Meta:
         model = ProductImage
-        fields = ['id', 'image', 'image_url', 'alt_text', 'is_main', 'order']
+        fields = ['id', 'image', 'alt_text', 'is_main']
         read_only_fields = ['id']
 
-    def get_image_url(self, obj):
-        request = self.context.get('request')
-        if obj.image and request:
-            return request.build_absolute_uri(obj.image.url)
-        return None
+    def validate(self, attrs):
+        # Additional validations if needed can go here
+        return attrs
 
-class ProductVariantSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ProductVariant
-        fields = ['id', 'name', 'value', 'price_modifier', 'sku', 'stock', 'is_active']
-        read_only_fields = ['id']
-
+# -------------------------------
+# Product Review Serializer
+# this serializer handles product reviews, including user and rating
+# -------------------------------
 class ProductReviewSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)
-    created_at = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S", read_only=True)
+    user = UserDetailSerializer(read_only=True)  # Using UserDetailSerializer from Users app
 
     class Meta:
         model = ProductReview
-        fields = ['id', 'user', 'rating', 'title', 'review', 'is_approved', 'created_at']
-        read_only_fields = ['id', 'user', 'created_at']
+        fields = ['id', 'user', 'rating', 'review', 'created_at', 'updated_at', 'is_approved']
+        read_only_fields = ['id', 'user', 'created_at', 'updated_at', 'is_approved']
 
     def validate_rating(self, value):
-        if not 1 <= value <= 5:
-            raise serializers.ValidationError("Rating must be between 1 and 5")
+        if not (1 <= value <= 5):
+            raise serializers.ValidationError("Rating must be between 1 and 5.")
         return value
 
+# -------------------------------
+# Product Question Serializer
+# this serializer handles product questions, including user and answer
+# -------------------------------
+class ProductQuestionSerializer(serializers.ModelSerializer):
+    user = UserDetailSerializer(read_only=True)
+    answered_at = serializers.DateTimeField(read_only=True)
+
+    class Meta:
+        model = ProductQuestion
+        fields = ['id', 'user', 'question', 'answer', 'created_at', 'answered_at', 'is_public', 'is_approved']
+        read_only_fields = ['id', 'user', 'created_at', 'answered_at', 'is_approved']
+
+    def validate(self, attrs):
+        # Ensure answer is provided only if question is answered
+        if attrs.get('answer') and not attrs.get('is_public', True):
+            # example rule: non-public answered questions maybe disallowed, adjust as needed
+            pass
+        return attrs
+
+# -------------------------------
+# Product Serializer
+# this serializer handles the product model, including vendor, category, and nested relationships
+# -------------------------------
 class ProductSerializer(serializers.ModelSerializer):
-    vendor = VendorSerializer(read_only=True)
-    category = CategorySerializer(read_only=True)
-    images = ProductImageSerializer(many=True, read_only=True)
-    variants = ProductVariantSerializer(many=True, read_only=True)
-    reviews = ProductReviewSerializer(many=True, read_only=True)
-    current_price = serializers.SerializerMethodField()
-    main_image = serializers.SerializerMethodField()
-    in_stock = serializers.SerializerMethodField()
-
-    class Meta:
-        model = Product
-        fields = [
-            'id', 'vendor', 'category', 'name', 'slug', 'description', 'specifications',
-            'price', 'discount_price', 'current_price', 'cost_price', 'stock', 'sku', 'upc',
-            'status', 'is_featured', 'is_active', 'created_at', 'updated_at', 'published_at',
-            'images', 'variants', 'reviews', 'main_image', 'in_stock'
-        ]
-        read_only_fields = [
-            'id', 'slug', 'current_price', 'created_at', 'updated_at', 'published_at',
-            'vendor', 'in_stock'
-        ]
-
-    def get_current_price(self, obj):
-        return obj.discount_price if obj.discount_price else obj.price
-
-    def get_main_image(self, obj):
-        main_image = obj.images.filter(is_main=True).first()
-        if main_image:
-            serializer = ProductImageSerializer(main_image, context=self.context)
-            return serializer.data
-        return None
-
-    def get_in_stock(self, obj):
-        return obj.stock > 0
-
-class ProductCreateUpdateSerializer(serializers.ModelSerializer):
-    category = serializers.PrimaryKeyRelatedField(
-        queryset=Category.objects.all(),
-        required=False,
-        allow_null=True
+    vendor = VendorProfileSerializer(read_only=True)  # Using VendorProfileSerializer for read operations
+    vendor_id = serializers.PrimaryKeyRelatedField(
+        queryset=Vendor.objects.all(),
+        source='vendor',
+        write_only=True
     )
-    images = ProductImageSerializer(many=True, required=False)
+    category = serializers.PrimaryKeyRelatedField(queryset=Category.objects.all())
+
+    images = ProductImageSerializer(many=True, read_only=True)
+    reviews = ProductReviewSerializer(many=True, read_only=True)
+    questions = ProductQuestionSerializer(many=True, read_only=True)
 
     class Meta:
         model = Product
         fields = [
-            'id', 'category', 'name', 'description', 'specifications',
-            'price', 'discount_price', 'cost_price', 'stock', 'sku', 'upc',
-            'status', 'is_featured', 'is_active', 'images'
+            'id', 'vendor', 'vendor_id', 'category', 'name', 'description', 
+            'price', 'discount_price', 'stock', 'sku', 'is_approved', 
+            'is_active', 'created_at', 'updated_at', 'images', 'reviews', 
+            'questions',
         ]
-        read_only_fields = ['id']
+        read_only_fields = ['id', 'vendor', 'is_approved', 'created_at', 'updated_at']
 
     def validate(self, data):
-        if data.get('discount_price') and data.get('price'):
-            if data['discount_price'] >= data['price']:
-                raise serializers.ValidationError("Discount price must be lower than regular price")
+        price = data.get('price')
+        discount_price = data.get('discount_price')
+        if discount_price is not None and discount_price > price:
+            raise serializers.ValidationError("Discount price cannot be greater than the original price.")
         return data
-
-    def create(self, validated_data):
-        images_data = validated_data.pop('images', [])
-        product = Product.objects.create(
-            vendor=self.context['request'].user.vendor,
-            **validated_data
-        )
-        for image_data in images_data:
-            ProductImage.objects.create(product=product, **image_data)
-        return product
-
-class VendorProductRelationSerializer(serializers.ModelSerializer):
-    vendor = VendorSerializer(read_only=True)
-    product = ProductSerializer(read_only=True)
-
-    class Meta:
-        model = VendorProductRelation
-        fields = ['id', 'vendor', 'product', 'is_primary', 'commission_rate', 'created_at']
-        read_only_fields = ['id', 'created_at']

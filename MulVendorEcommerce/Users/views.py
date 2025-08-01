@@ -1,171 +1,295 @@
-# users/views.py
-
-from rest_framework import generics, status, permissions, serializers
+from rest_framework import generics, permissions, status, viewsets
 from rest_framework.response import Response
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView, TokenVerifyView
+from rest_framework.decorators import action
+from rest_framework_simplejwt.views import TokenObtainPairView
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from django.contrib.auth import get_user_model
+from django.db import transaction
 
-from .models import User, Customer, Vendor, AdminProfile, VendorEmployee
+from .models import Customer, Vendor, AdminProfile, VendorEmployee, Address
 from .serializers import (
-    UserSerializer,
-    CustomerSerializer,
-    VendorSerializer,
+    CustomTokenObtainPairSerializer,
+    UserDetailSerializer,
+    CustomerProfileSerializer,
+    VendorProfileSerializer,
     AdminProfileSerializer,
-    VendorEmployeeSerializer,
-    CustomTokenObtainPairSerializer
+    VendorEmployeeProfileSerializer,
+    AddressSerializer,
+    AdminUserManagementSerializer,
+    AdminVendorManagementSerializer,
+    CustomerRegistrationSerializer,
+    VendorRegistrationSerializer
 )
-from .permissions import IsSuperAdmin, IsVendorOwner, IsProfileOwner
 
-# ---------------------------
-# Authentication Views
-# ---------------------------
+User = get_user_model()
+
 
 class CustomTokenObtainPairView(TokenObtainPairView):
+    """
+    Custom JWT token authentication view that includes additional user claims
+    """
     serializer_class = CustomTokenObtainPairSerializer
 
 
-class CustomTokenRefreshView(TokenRefreshView):
-    pass
+class UserRegistrationView(generics.CreateAPIView):
+    """
+    Handle user registration with role-based profile creation
+    Supports both customer and vendor registration
+    """
+    permission_classes = [permissions.AllowAny]
 
+    def get_serializer_class(self):
+        role = self.request.data.get('role', User.Role.CUSTOMER)
+        if role == User.Role.CUSTOMER:
+            return CustomerRegistrationSerializer
+        elif role == User.Role.VENDOR:
+            return VendorRegistrationSerializer
+        return CustomerRegistrationSerializer  # Default to customer registration
 
-class CustomTokenVerifyView(TokenVerifyView):
-    pass
-
-# ---------------------------
-# User Views
-# ---------------------------
-
-class UserListCreateAPIView(generics.ListCreateAPIView):
-    queryset = User.objects.all()
-    serializer_class = UserSerializer
-
-    def get_permissions(self):
-        if self.request.method == 'POST':
-            return [permissions.AllowAny()]  # Allow public registration
-        return [IsSuperAdmin()]  # Only superadmin can list users
-
+    @transaction.atomic
     def create(self, request, *args, **kwargs):
+        role = request.data.get('role', User.Role.CUSTOMER)
+        
+        if role not in [User.Role.CUSTOMER, User.Role.VENDOR]:
+            return Response(
+                {"detail": "Invalid registration role. Must be either 'CUSTOMER' or 'VENDOR'."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
-        headers = self.get_success_headers(serializer.data)
-        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+        
+        try:
+            user = serializer.save()
+            response_serializer = (
+                CustomerProfileSerializer(user.customer) if role == User.Role.CUSTOMER
+                else VendorProfileSerializer(user.vendor)
+            )
+            return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response(
+                {"detail": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
-class UserRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = User.objects.all()
-    serializer_class = UserSerializer
+class UserProfileView(generics.RetrieveUpdateAPIView):
+    """
+    Retrieve and update the current authenticated user's profile
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = UserDetailSerializer
+
+    def get_object(self):
+        return self.request.user
+
+
+class CustomerProfileView(generics.RetrieveUpdateAPIView):
+    """
+    Retrieve and update customer profile information
+    Accessible only by the customer owner
+    """
+    serializer_class = CustomerProfileSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self):
+        if self.request.user.role != User.Role.CUSTOMER:
+            raise PermissionDenied("You are not a customer.")
+        return get_object_or_404(Customer, user=self.request.user)
+
+
+class VendorProfileView(generics.RetrieveUpdateAPIView):
+    """
+    Retrieve and update vendor profile information
+    Accessible only by the vendor owner
+    """
+    serializer_class = VendorProfileSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self):
+        if self.request.user.role != User.Role.VENDOR:
+            raise PermissionDenied("You are not a vendor.")
+        return get_object_or_404(Vendor, user=self.request.user)
+
+
+class VendorVerificationView(generics.UpdateAPIView):
+    """
+    Admin endpoint for managing vendor verification status
+    Allows updating verification status and notes
+    """
+    queryset = Vendor.objects.all()
+    serializer_class = AdminVendorManagementSerializer
+    permission_classes = [permissions.IsAdminUser]
     lookup_field = 'pk'
 
-    def get_permissions(self):
-        if self.request.method in ['PUT', 'PATCH', 'DELETE']:
-            return [IsSuperAdmin() | IsProfileOwner()]
-        return [permissions.IsAuthenticated()]
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        vendor = self.get_object()
+        new_status = request.data.get('verification_status')
+        
+        if new_status not in [Vendor.VerificationStatus.VERIFIED, Vendor.VerificationStatus.REJECTED]:
+            return Response(
+                {"detail": "Invalid verification status. Must be either 'verified' or 'rejected'."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-    def perform_update(self, serializer):
-        # Prevent non-superusers from modifying roles
-        if 'role' in serializer.validated_data and not self.request.user.is_superuser:
-            raise serializers.ValidationError("Only superusers can change user roles.")
-        serializer.save()
+        try:
+            vendor.verification_status = new_status
+            vendor.verification_notes = request.data.get('verification_notes', '')
+            vendor.verified_by = request.user
+            vendor.verified_at = timezone.now()
+            vendor.save()
 
-# ---------------------------
-# Customer Views
-# ---------------------------
-
-class CustomerListCreateAPIView(generics.ListCreateAPIView):
-    serializer_class = CustomerSerializer
-
-    def get_queryset(self):
-        if self.request.user.is_superuser:
-            return Customer.objects.all()
-        return Customer.objects.filter(user=self.request.user)
-
-    def get_permissions(self):
-        if self.request.method == 'POST':
-            return []
-        return [permissions.IsAuthenticated()]
-
-    def perform_create(self, serializer):
-        user_data = serializer.validated_data.pop('user')
-        user_serializer = UserSerializer(data=user_data)
-        user_serializer.is_valid(raise_exception=True)
-        user = user_serializer.save(role='CUSTOMER')
-        serializer.save(user=user)
+            serializer = self.get_serializer(vendor)
+            return Response(serializer.data)
+        except Exception as e:
+            return Response(
+                {"detail": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
-class CustomerRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Customer.objects.all()
-    serializer_class = CustomerSerializer
-    permission_classes = [IsProfileOwner | IsSuperAdmin]
-
-# ---------------------------
-# Vendor Views
-# ---------------------------
-
-class VendorListCreateAPIView(generics.ListCreateAPIView):
-    serializer_class = VendorSerializer
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get_queryset(self):
-        if self.request.user.is_superuser:
-            return Vendor.objects.all()
-        return Vendor.objects.filter(user=self.request.user)
-
-    def perform_create(self, serializer):
-        user = self.request.user
-        if user.role != 'VENDOR':
-            user.role = 'VENDOR'
-            user.save()
-        serializer.save(user=user)
-
-
-class VendorRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Vendor.objects.all()
-    serializer_class = VendorSerializer
-    permission_classes = [IsVendorOwner | IsSuperAdmin]
-
-# ---------------------------
-# Admin Profile Views
-# ---------------------------
-
-class AdminProfileListCreateAPIView(generics.ListCreateAPIView):
-    queryset = AdminProfile.objects.all()
+class AdminProfileView(generics.RetrieveUpdateAPIView):
+    """
+    Retrieve and update admin profile information
+    Accessible only by admin users
+    """
     serializer_class = AdminProfileSerializer
-    permission_classes = [IsSuperAdmin]
+    permission_classes = [permissions.IsAdminUser]
+
+    def get_object(self):
+        return get_object_or_404(AdminProfile, user=self.request.user)
 
 
-class AdminProfileRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = AdminProfile.objects.all()
-    serializer_class = AdminProfileSerializer
-    permission_classes = [IsSuperAdmin]
-
-# ---------------------------
-# Vendor Employee Views
-# ---------------------------
-
-class VendorEmployeeListCreateAPIView(generics.ListCreateAPIView):
-    serializer_class = VendorEmployeeSerializer
+class VendorEmployeeViewSet(viewsets.ModelViewSet):
+    """
+    CRUD operations for vendor employees
+    Accessible only by the vendor owner
+    """
+    serializer_class = VendorEmployeeProfileSerializer
     permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ['get', 'post', 'patch', 'delete']
 
     def get_queryset(self):
-        if self.request.user.role == 'VENDOR':
+        if self.request.user.role == User.Role.VENDOR:
             vendor = get_object_or_404(Vendor, user=self.request.user)
             return VendorEmployee.objects.filter(vendor=vendor)
-        return VendorEmployee.objects.all()
+        return VendorEmployee.objects.none()
 
     def perform_create(self, serializer):
-        if self.request.user.role == 'VENDOR':
-            vendor = get_object_or_404(Vendor, user=self.request.user)
-            serializer.save(vendor=vendor)
-        else:
-            serializer.save()
+        if self.request.user.role != User.Role.VENDOR:
+            raise PermissionDenied("Only vendors can create employees.")
+        vendor = get_object_or_404(Vendor, user=self.request.user)
+        serializer.save(vendor=vendor)
 
 
-class VendorEmployeeRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = VendorEmployee.objects.all()
-    serializer_class = VendorEmployeeSerializer
+class AddressViewSet(viewsets.ModelViewSet):
+    """
+    CRUD operations for user addresses
+    Each user can manage their own addresses
+    """
+    serializer_class = AddressSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ['get', 'post', 'patch', 'delete']
 
-    def get_permissions(self):
-        if self.request.method in ['PUT', 'PATCH', 'DELETE']:
-            return [IsVendorOwner() | IsSuperAdmin()]
-        return [permissions.IsAuthenticated()]
+    def get_queryset(self):
+        return Address.objects.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+
+class AdminUserManagementViewSet(viewsets.ModelViewSet):
+    """
+    Admin interface for comprehensive user management
+    Includes activation/deactivation endpoints
+    """
+    queryset = User.objects.all().order_by('-date_joined')
+    serializer_class = AdminUserManagementSerializer
+    permission_classes = [permissions.IsAdminUser]
+    filterset_fields = ['role', 'is_active', 'is_verified']
+    search_fields = ['email', 'username']
+    http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
+
+    @action(detail=True, methods=['post'])
+    def activate(self, request, pk=None):
+        """Activate a user account"""
+        user = self.get_object()
+        if user.is_active:
+            return Response(
+                {'status': 'User is already active'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        user.is_active = True
+        user.save()
+        return Response(
+            {'status': 'User activated successfully'},
+            status=status.HTTP_200_OK
+        )
+
+    @action(detail=True, methods=['post'])
+    def deactivate(self, request, pk=None):
+        """Deactivate a user account"""
+        user = self.get_object()
+        if not user.is_active:
+            return Response(
+                {'status': 'User is already inactive'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        user.is_active = False
+        user.save()
+        return Response(
+            {'status': 'User deactivated successfully'},
+            status=status.HTTP_200_OK
+        )
+
+
+class AdminVendorManagementViewSet(viewsets.ModelViewSet):
+    """
+    Admin interface for comprehensive vendor management
+    Includes verification endpoints
+    """
+    queryset = Vendor.objects.all().order_by('-created_at')
+    serializer_class = AdminVendorManagementSerializer
+    permission_classes = [permissions.IsAdminUser]
+    filterset_fields = ['verification_status', 'is_active']
+    search_fields = ['business_name', 'user__email']
+    http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
+
+    @action(detail=True, methods=['post'])
+    def verify(self, request, pk=None):
+        """Verify a vendor account"""
+        vendor = self.get_object()
+        if vendor.verification_status == Vendor.VerificationStatus.VERIFIED:
+            return Response(
+                {'status': 'Vendor is already verified'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        vendor.verification_status = Vendor.VerificationStatus.VERIFIED
+        vendor.verified_by = request.user
+        vendor.verified_at = timezone.now()
+        vendor.save()
+        return Response(
+            {'status': 'Vendor verified successfully'},
+            status=status.HTTP_200_OK
+        )
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        """Reject a vendor account"""
+        vendor = self.get_object()
+        if vendor.verification_status == Vendor.VerificationStatus.REJECTED:
+            return Response(
+                {'status': 'Vendor is already rejected'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        vendor.verification_status = Vendor.VerificationStatus.REJECTED
+        vendor.verification_notes = request.data.get('notes', '')
+        vendor.verified_by = request.user
+        vendor.verified_at = timezone.now()
+        vendor.save()
+        return Response(
+            {'status': 'Vendor rejected successfully'},
+            status=status.HTTP_200_OK
+        )

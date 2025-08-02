@@ -4,6 +4,7 @@ from Users.serializers import VendorProfileSerializer, UserSerializer
 from Users.models import VendorProfile
 import uuid
 
+#This class is serializer for Category model
 class CategorySerializer(serializers.ModelSerializer):
     subcategories = serializers.SerializerMethodField()
     parent_category_name = serializers.CharField(source='parent_category.name', read_only=True)
@@ -32,6 +33,7 @@ class CategorySerializer(serializers.ModelSerializer):
             return obj.image.url
         return None
 
+#this class is serialize product image model
 class ProductImageSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
 

@@ -16,12 +16,6 @@ DEBUG = True
 
 ALLOWED_HOSTS = []
 
-import os
-
-GDAL_LIBRARY_PATH = os.environ.get(
-    'GDAL_LIBRARY_PATH',
-    r'C:\OSGeo4W\bin\gdal311.dll'  # Adjust to match the `.dll` file in your bin folder
-)
 
 # Application definition
 
@@ -61,6 +55,7 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'MulVendorEcommerce.urls'
 
+
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -78,7 +73,17 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'MulVendorEcommerce.wsgi.application'
 
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": "redis://127.0.0.1:6379/1",
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        }
+    }
+}
 
+CACHE_TTL = 60 * 15  # 15 minutes
 # Resting API configuration
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (

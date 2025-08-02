@@ -100,6 +100,15 @@ REST_FRAMEWORK = {
 
 
 }
+
+import os
+if os.name == 'nt':  # Only for Windows
+    OSGEO4W = r"C:\OSGeo4W"
+    os.environ['OSGEO4W_ROOT'] = OSGEO4W
+    os.environ['GDAL_DATA'] = os.path.join(OSGEO4W, "share", "gdal")
+    os.environ['PROJ_LIB'] = os.path.join(OSGEO4W, "share", "proj")
+    os.environ['PATH'] = OSGEO4W + r'\bin;' + os.environ['PATH']
+
 # Simple JWT configuration
 # https://django-rest-framework-simplejwt.readthedocs.io/en/latest/settings.html
 from datetime import timedelta

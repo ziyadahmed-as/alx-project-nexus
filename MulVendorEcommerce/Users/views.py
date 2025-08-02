@@ -1,4 +1,4 @@
-from rest_framework import generics, permissions, status, viewsets, PermissionDenied
+from rest_framework import generics, permissions, status, viewsets
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework_simplejwt.views import TokenObtainPairView
@@ -6,6 +6,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.core.exceptions import PermissionDenied
 
 from .models import Customer, Vendor, AdminProfile, VendorEmployee, Address
 from .serializers import (
@@ -21,22 +22,15 @@ from .serializers import (
     CustomerRegistrationSerializer,
     VendorRegistrationSerializer
 )
-
+# this line is necessary to ensure the User model is loaded
 User = get_user_model()
 
-
+# Custom Token Obtain Pair View to use our custom serializer
 class CustomTokenObtainPairView(TokenObtainPairView):
-    """
-    Custom JWT token authentication view that includes additional user claims
-    """
     serializer_class = CustomTokenObtainPairSerializer
 
-
+# this view handles user registration for both customers and vendors
 class UserRegistrationView(generics.CreateAPIView):
-    """
-    Handle user registration with role-based profile creation
-    Supports both customer and vendor registration
-    """
     permission_classes = [permissions.AllowAny]
 
     def get_serializer_class(self):
@@ -45,7 +39,7 @@ class UserRegistrationView(generics.CreateAPIView):
             return CustomerRegistrationSerializer
         elif role == User.Role.VENDOR:
             return VendorRegistrationSerializer
-        return CustomerRegistrationSerializer  # Default to customer registration
+        return super().get_serializer_class()
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
@@ -61,10 +55,10 @@ class UserRegistrationView(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
         
         try:
-            user = serializer.save()
+            instance = serializer.save()
             response_serializer = (
-                CustomerProfileSerializer(user.customer) if role == User.Role.CUSTOMER
-                else VendorProfileSerializer(user.vendor)
+                CustomerProfileSerializer(instance) if role == User.Role.CUSTOMER
+                else VendorProfileSerializer(instance)
             )
             return Response(response_serializer.data, status=status.HTTP_201_CREATED)
         except Exception as e:
@@ -75,9 +69,6 @@ class UserRegistrationView(generics.CreateAPIView):
 
 
 class UserProfileView(generics.RetrieveUpdateAPIView):
-    """
-    Retrieve and update the current authenticated user's profile
-    """
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = UserDetailSerializer
 
@@ -86,39 +77,27 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
 
 
 class CustomerProfileView(generics.RetrieveUpdateAPIView):
-    """
-    Retrieve and update customer profile information
-    Accessible only by the customer owner
-    """
     serializer_class = CustomerProfileSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_object(self):
         if self.request.user.role != User.Role.CUSTOMER:
-            raise PermissionDenied("You are not a customer.")
-        return get_object_or_404(Customer, user=self.request.user)
+            raise PermissionDenied("You are not a customer")
+        return get_object_or_404(Customer.objects.select_related('user'), user=self.request.user)
 
 
 class VendorProfileView(generics.RetrieveUpdateAPIView):
-    """
-    Retrieve and update vendor profile information
-    Accessible only by the vendor owner
-    """
     serializer_class = VendorProfileSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_object(self):
         if self.request.user.role != User.Role.VENDOR:
-            raise PermissionDenied("You are not a vendor.")
-        return get_object_or_404(Vendor, user=self.request.user)
+            raise PermissionDenied("You are not a vendor")
+        return get_object_or_404(Vendor.objects.select_related('user'), user=self.request.user)
 
 
 class VendorVerificationView(generics.UpdateAPIView):
-    """
-    Admin endpoint for managing vendor verification status
-    Allows updating verification status and notes
-    """
-    queryset = Vendor.objects.all()
+    queryset = Vendor.objects.select_related('user', 'verified_by')
     serializer_class = AdminVendorManagementSerializer
     permission_classes = [permissions.IsAdminUser]
     lookup_field = 'pk'
@@ -151,22 +130,14 @@ class VendorVerificationView(generics.UpdateAPIView):
 
 
 class AdminProfileView(generics.RetrieveUpdateAPIView):
-    """
-    Retrieve and update admin profile information
-    Accessible only by admin users
-    """
     serializer_class = AdminProfileSerializer
     permission_classes = [permissions.IsAdminUser]
 
     def get_object(self):
-        return get_object_or_404(AdminProfile, user=self.request.user)
+        return get_object_or_404(AdminProfile.objects.select_related('user'), user=self.request.user)
 
 
 class VendorEmployeeViewSet(viewsets.ModelViewSet):
-    """
-    CRUD operations for vendor employees
-    Accessible only by the vendor owner
-    """
     serializer_class = VendorEmployeeProfileSerializer
     permission_classes = [permissions.IsAuthenticated]
     http_method_names = ['get', 'post', 'patch', 'delete']
@@ -174,37 +145,29 @@ class VendorEmployeeViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         if self.request.user.role == User.Role.VENDOR:
             vendor = get_object_or_404(Vendor, user=self.request.user)
-            return VendorEmployee.objects.filter(vendor=vendor)
+            return VendorEmployee.objects.filter(vendor=vendor).select_related('user', 'vendor')
         return VendorEmployee.objects.none()
 
     def perform_create(self, serializer):
         if self.request.user.role != User.Role.VENDOR:
-            raise PermissionDenied("Only vendors can create employees.")
+            raise PermissionDenied("Only vendors can create employees")
         vendor = get_object_or_404(Vendor, user=self.request.user)
         serializer.save(vendor=vendor)
 
 
 class AddressViewSet(viewsets.ModelViewSet):
-    """
-    CRUD operations for user addresses
-    Each user can manage their own addresses
-    """
     serializer_class = AddressSerializer
     permission_classes = [permissions.IsAuthenticated]
     http_method_names = ['get', 'post', 'patch', 'delete']
 
     def get_queryset(self):
-        return Address.objects.filter(user=self.request.user)
+        return Address.objects.filter(user=self.request.user).select_related('user')
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
 
 class AdminUserManagementViewSet(viewsets.ModelViewSet):
-    """
-    Admin interface for comprehensive user management
-    Includes activation/deactivation endpoints
-    """
     queryset = User.objects.all().order_by('-date_joined')
     serializer_class = AdminUserManagementSerializer
     permission_classes = [permissions.IsAdminUser]
@@ -212,9 +175,11 @@ class AdminUserManagementViewSet(viewsets.ModelViewSet):
     search_fields = ['email', 'username']
     http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
 
+    def get_queryset(self):
+        return super().get_queryset().select_related('customer', 'vendor', 'adminprofile')
+
     @action(detail=True, methods=['post'])
     def activate(self, request, pk=None):
-        """Activate a user account"""
         user = self.get_object()
         if user.is_active:
             return Response(
@@ -230,7 +195,6 @@ class AdminUserManagementViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def deactivate(self, request, pk=None):
-        """Deactivate a user account"""
         user = self.get_object()
         if not user.is_active:
             return Response(
@@ -246,11 +210,7 @@ class AdminUserManagementViewSet(viewsets.ModelViewSet):
 
 
 class AdminVendorManagementViewSet(viewsets.ModelViewSet):
-    """
-    Admin interface for comprehensive vendor management
-    Includes verification endpoints
-    """
-    queryset = Vendor.objects.all().order_by('-created_at')
+    queryset = Vendor.objects.all().order_by('-created_at').select_related('user', 'verified_by')
     serializer_class = AdminVendorManagementSerializer
     permission_classes = [permissions.IsAdminUser]
     filterset_fields = ['verification_status', 'is_active']
@@ -259,7 +219,6 @@ class AdminVendorManagementViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def verify(self, request, pk=None):
-        """Verify a vendor account"""
         vendor = self.get_object()
         if vendor.verification_status == Vendor.VerificationStatus.VERIFIED:
             return Response(
@@ -277,7 +236,6 @@ class AdminVendorManagementViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def reject(self, request, pk=None):
-        """Reject a vendor account"""
         vendor = self.get_object()
         if vendor.verification_status == Vendor.VerificationStatus.REJECTED:
             return Response(

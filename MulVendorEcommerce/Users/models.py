@@ -1,36 +1,40 @@
 import uuid
-from django.contrib.auth.models import AbstractUser, BaseUserManager, Group, Permission
+from django.contrib.auth.models import AbstractUser, BaseUserManager
+from django.contrib.gis.db.models import PointField
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django.core.validators import RegexValidator
 
 class UserManager(BaseUserManager):
-    def create_user(self, email, username, password=None, **extra_fields):
+    """Custom user manager for email-based authentication"""
+    
+    def create_user(self, email, username=None, password=None, **extra_fields):
         if not email:
             raise ValueError(_('Users must have an email address'))
-        if not username:
-            raise ValueError(_('Users must have a username'))
-
+        
         email = self.normalize_email(email)
-        user = self.model(email=email, username=username, **extra_fields)
+        user = self.model(email=email, username=username or email, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
         return user
 
-    def create_superuser(self, email, username, password=None, **extra_fields):
+    def create_superuser(self, email, username=None, password=None, **extra_fields):
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
         extra_fields.setdefault('role', User.Role.ADMIN)
         extra_fields.setdefault('is_verified', True)
 
-        if not extra_fields.get('is_staff'):
+        if extra_fields.get('is_staff') is not True:
             raise ValueError(_('Superuser must have is_staff=True.'))
-        if not extra_fields.get('is_superuser'):
+        if extra_fields.get('is_superuser') is not True:
             raise ValueError(_('Superuser must have is_superuser=True.'))
 
         return self.create_user(email, username, password, **extra_fields)
 
 class User(AbstractUser):
+    """Custom user model with spatial support for vendors"""
+    
     class Role(models.TextChoices):
         ADMIN = 'ADMIN', _('Admin')
         CUSTOMER = 'CUSTOMER', _('Customer')
@@ -38,28 +42,26 @@ class User(AbstractUser):
         VENDOR_STAFF = 'VENDOR_STAFF', _('Vendor Staff')
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    email = models.EmailField(unique=True, error_messages={
-        'unique': _('A user with that email already exists.'),
-    })
-    phone_number = models.CharField(max_length=15, blank=True, null=True)
+    email = models.EmailField(unique=True, error_messages={'unique': _('Email already exists')})
+    phone_regex = RegexValidator(regex=r'^\+?1?\d{9,15}$', message="Phone format: '+999999999'")
+    phone_number = models.CharField(validators=[phone_regex], max_length=17, blank=True, null=True)
     is_verified = models.BooleanField(default=False)
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.CUSTOMER)
+    last_active = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    last_active = models.DateTimeField(null=True, blank=True)
 
-    # Remove username from REQUIRED_FIELDS since we're using email as primary identifier
+    USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = []
 
     objects = UserManager()
 
-    def __str__(self):
-        return self.email
-
     class Meta:
         ordering = ['-created_at']
-        verbose_name = _('user')
-        verbose_name_plural = _('users')
+        indexes = [models.Index(fields=['email']), models.Index(fields=['role'])]
+
+    def __str__(self):
+        return self.email
 
     def save(self, *args, **kwargs):
         if self.is_superuser:
@@ -67,43 +69,14 @@ class User(AbstractUser):
             self.is_verified = True
         super().save(*args, **kwargs)
 
-class Customer(models.Model):
-    user = models.OneToOneField(
-        User, 
-        on_delete=models.CASCADE, 
-        primary_key=True, 
-        related_name='customer_profile'
-    )
-    first_name = models.CharField(max_length=30, blank=True, null=True)
-    last_name = models.CharField(max_length=30, blank=True, null=True)
-    date_of_birth = models.DateField(null=True, blank=True)
-    profile_picture = models.ImageField(
-        upload_to='customer_profiles/', 
-        null=True, 
-        blank=True
-    )
-    preferred_language = models.CharField(max_length=10, default='en')
-    marketing_opt_in = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = _('customer')
-        verbose_name_plural = _('customers')
-
-    def __str__(self):
-        return f"{self.full_name} ({self.user.email})"
-
-    @property
-    def full_name(self):
-        return f"{self.first_name or ''} {self.last_name or ''}".strip()
-
-class Vendor(models.Model):
+class VendorProfile(models.Model):
+    """Vendor profile with spatial business location"""
+    
     class VerificationStatus(models.TextChoices):
-        PENDING = 'pending', _('Pending Verification')
-        VERIFIED = 'verified', _('Verified')
-        REJECTED = 'rejected', _('Rejected')
-        SUSPENDED = 'suspended', _('Suspended')
+        PENDING = 'PENDING', _('Pending')
+        VERIFIED = 'VERIFIED', _('Verified')
+        REJECTED = 'REJECTED', _('Rejected')
+        SUSPENDED = 'SUSPENDED', _('Suspended')
 
     user = models.OneToOneField(
         User,
@@ -112,153 +85,83 @@ class Vendor(models.Model):
         related_name='vendor_profile'
     )
     business_name = models.CharField(max_length=100)
-    business_email = models.EmailField()
-    business_phone = models.CharField(max_length=20)
-    tax_id = models.CharField(max_length=50, blank=True, null=True)
-    business_registration = models.FileField(
-        upload_to='vendor_documents/',
+    business_address = models.OneToOneField(
+        'Address',
+        on_delete=models.CASCADE,
+        related_name='vendor_location',
         null=True,
         blank=True
     )
+    business_location = PointField(null=True, blank=True, geography=True)
+    business_email = models.EmailField()
+    business_phone = models.CharField(max_length=20)
+    tax_id = models.CharField(max_length=50, blank=True, null=True)
     store_logo = models.ImageField(upload_to='vendor_logos/')
-    store_banner = models.ImageField(upload_to='vendor_banners/', null=True, blank=True)
-    store_description = models.TextField()
-    shipping_policy = models.TextField()
-    return_policy = models.TextField()
-    average_rating = models.FloatField(default=0.0)
     verification_status = models.CharField(
         max_length=20,
         choices=VerificationStatus.choices,
         default=VerificationStatus.PENDING
     )
-    verification_notes = models.TextField(blank=True, null=True)
-    verified_by = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='verified_vendors'
-    )
-    verified_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        verbose_name = _('vendor')
-        verbose_name_plural = _('vendors')
-        ordering = ['-created_at']
+        verbose_name = _('Vendor Profile')
+        indexes = [models.Index(fields=['business_location'])]
 
     def __str__(self):
-        return f"{self.business_name} ({self.user.email})"
+        return f"{self.business_name}"
 
     def save(self, *args, **kwargs):
-        if self.verification_status == self.VerificationStatus.VERIFIED and not self.verified_at:
-            self.verified_at = timezone.now()
+        """Sync business location with address if exists"""
+        if self.business_address and self.business_address.location:
+            self.business_location = self.business_address.location
         super().save(*args, **kwargs)
 
-class AdminProfile(models.Model):
-    class AccessLevel(models.TextChoices):
-        SUPER = 'SUPER', _('Super Admin')
-        CONTENT = 'CONTENT', _('Content Manager')
-        SUPPORT = 'SUPPORT', _('Support Staff')
-        FINANCE = 'FINANCE', _('Finance Admin')
-
-    user = models.OneToOneField(
-        User,
-        on_delete=models.CASCADE,
-        primary_key=True,
-        related_name='admin_profile'
-    )
-    access_level = models.CharField(
-        max_length=20,
-        choices=AccessLevel.choices,
-        default=AccessLevel.SUPPORT
-    )
-    department = models.CharField(max_length=100, blank=True, null=True)
-    notes = models.TextField(blank=True)
-    can_manage_users = models.BooleanField(default=False)
-    can_manage_vendors = models.BooleanField(default=False)
-    can_manage_content = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = _('admin profile')
-        verbose_name_plural = _('admin profiles')
-
-    def __str__(self):
-        return f"{self.get_access_level_display()} ({self.user.email})"
-
-class VendorEmployee(models.Model):
-    class Role(models.TextChoices):
-        MANAGER = 'MANAGER', _('Manager')
-        STAFF = 'STAFF', _('Staff')
-        CUSTOMER_SERVICE = 'CS', _('Customer Service')
-        WAREHOUSE = 'WAREHOUSE', _('Warehouse Staff')
-
-    user = models.OneToOneField(
-        User,
-        on_delete=models.CASCADE,
-        primary_key=True,
-        related_name='vendor_employee_profile'
-    )
-    vendor = models.ForeignKey(
-        Vendor,
-        on_delete=models.CASCADE,
-        related_name='employees'
-    )
-    role = models.CharField(max_length=20, choices=Role.choices)
-    department = models.CharField(max_length=100, blank=True, null=True)
-    hire_date = models.DateField(null=True, blank=True)
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = _('vendor employee')
-        verbose_name_plural = _('vendor employees')
-        ordering = ['vendor', 'role']
-
-    def __str__(self):
-        return f"{self.user.email} ({self.get_role_display()} at {self.vendor.business_name})"
-
 class Address(models.Model):
-    class Type(models.TextChoices):
+    """Spatial address model with one-to-one vendor relationship"""
+    
+    class AddressType(models.TextChoices):
         HOME = 'HOME', _('Home')
-        WORK = 'WORK', _('Work')
-        BILLING = 'BILLING', _('Billing')
+        BUSINESS = 'BUSINESS', _('Business')
         SHIPPING = 'SHIPPING', _('Shipping')
-        OTHER = 'OTHER', _('Other')
+        BILLING = 'BILLING', _('Billing')
 
     user = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
         related_name='addresses'
     )
-    type = models.CharField(max_length=10, choices=Type.choices)
-    recipient_name = models.CharField(max_length=100, blank=True, null=True)
-    street = models.CharField(max_length=255)
+    address_type = models.CharField(
+        max_length=10,
+        choices=AddressType.choices,
+        default=AddressType.HOME
+    )
+    recipient_name = models.CharField(max_length=100)
+    street_address = models.CharField(max_length=255)
     city = models.CharField(max_length=100)
     state = models.CharField(max_length=100)
     country = models.CharField(max_length=100)
     postal_code = models.CharField(max_length=20)
+    location = PointField(null=True, blank=True, geography=True)
     phone_number = models.CharField(max_length=20)
     is_default = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        verbose_name = _('address')
-        verbose_name_plural = _('addresses')
-        ordering = ['-is_default', 'user', 'type']
-        unique_together = ('user', 'type', 'street', 'city', 'postal_code')
+        verbose_name = _('Address')
+        ordering = ['-is_default', 'user']
+        indexes = [models.Index(fields=['location'])]
 
     def __str__(self):
-        return f"{self.get_type_display()} address for {self.user.email}"
+        return f"{self.street_address}, {self.city}"
 
     def save(self, *args, **kwargs):
-        if self.is_default:
-            # Ensure only one default address per user
-            self.__class__.objects.filter(user=self.user, is_default=True).update(is_default=False)
+        """Geocode address if location is not set"""
+        if not self.location and self.street_address:
+            # Here you would typically call a geocoding service
+            # For now, we'll just save without coordinates
+            pass
         super().save(*args, **kwargs)

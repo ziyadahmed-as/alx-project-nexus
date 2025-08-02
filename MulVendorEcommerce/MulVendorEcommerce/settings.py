@@ -87,8 +87,20 @@ REST_FRAMEWORK = {
     #     'rest_framework.renderers.JSONRenderer',
     # ),
     # ...
-
+}
 # DRF Yasg (Swagger) Settings
+# In your settings.py file, carefully check the SWAGGER_SETTINGS dictionary:
+SWAGGER_SETTINGS = {
+    'SECURITY_DEFINITIONS': {  # ← Make sure all keys have colons
+        'Bearer': {
+            'type': 'apiKey',
+            'name': 'Authorization',
+            'in': 'header',
+            'description': 'JWT authentication. Example: "Bearer {token}"'
+        }
+    },
+    # ... rest of your configuration ...
+}
 
 SWAGGER_SETTINGS = {
     'SECURITY_DEFINITIONS': {
@@ -148,7 +160,7 @@ REDOC_SETTINGS = {
 }
 
 
-}
+
 
 import os
 if os.name == 'nt':  # Only for Windows

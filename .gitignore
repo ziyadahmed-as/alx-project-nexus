@@ -1,2 +1,22 @@
 eco/
-.__pycache__
+# Ignore Python bytecode files
+*.py[cod]
+# Ignore compiled files
+*.so
+*.pyc
+*.pyo   
+*.pyd
+*.db
+*.sqlite3
+*.log
+# Ignore virtual environment directories
+eco/
+
+# Ignore environment variable files
+.env
+# Ignore media files
+media/
+# Ignore static files
+static/
+# Ignore cache directories
+__pycache__/

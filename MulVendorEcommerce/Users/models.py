@@ -1,6 +1,6 @@
 import uuid
 from django.contrib.auth.models import AbstractUser, BaseUserManager
-from django.contrib.gis.db.models import PointField
+
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -92,7 +92,8 @@ class VendorProfile(models.Model):
         null=True,
         blank=True
     )
-    business_location = PointField(null=True, blank=True, geography=True)
+    business_location = models.CharField(max_length=100, null=True, blank=True)
+    business_description = models.TextField(blank=True, null=True)
     business_email = models.EmailField()
     business_phone = models.CharField(max_length=20)
     tax_id = models.CharField(max_length=50, blank=True, null=True)
@@ -144,7 +145,7 @@ class Address(models.Model):
     state = models.CharField(max_length=100)
     country = models.CharField(max_length=100)
     postal_code = models.CharField(max_length=20)
-    location = PointField(null=True, blank=True, geography=True)
+    location = models.CharField (max_length=255, null=True, blank=True)
     phone_number = models.CharField(max_length=20)
     is_default = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)

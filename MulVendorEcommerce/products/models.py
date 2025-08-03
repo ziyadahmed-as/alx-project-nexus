@@ -1,13 +1,23 @@
 from django.db import models
-from django.contrib.gis.db.models import PointField
 from django.utils.translation import gettext_lazy as _
 from django.core.validators import MinValueValidator
 from django.utils.text import slugify
 from Users.models import VendorProfile
 import uuid
+from django.core.cache import cache
+from django.conf import settings
+
+# Cache constants
+CACHE_TTL = getattr(settings, 'CACHE_TTL', 60 * 15)  # 15 minutes default
+CATEGORY_CACHE_KEY = "category_{id}"
+PRODUCT_CACHE_KEY = "product_{id}"
+PRODUCT_LIST_CACHE_KEY = "products_{vendor}_{status}_{page}"
+PRODUCT_VARIANT_CACHE_KEY = "variant_{id}"
+PRODUCT_REVIEW_CACHE_KEY = "review_{id}"
+PRODUCT_QUESTION_CACHE_KEY = "question_{id}"
 
 class Category(models.Model):
-    """Hierarchical product category system"""
+    """Hierarchical product category system with caching support"""
     class Meta:
         verbose_name = _('Category')
         verbose_name_plural = _('Categories')
@@ -40,9 +50,27 @@ class Category(models.Model):
         if not self.slug:
             self.slug = slugify(self.name)
         super().save(*args, **kwargs)
+        # Update cache
+        cache_key = CATEGORY_CACHE_KEY.format(id=self.id)
+        cache.set(cache_key, self, CACHE_TTL)
+
+    def delete(self, *args, **kwargs):
+        # Clear cache
+        cache_key = CATEGORY_CACHE_KEY.format(id=self.id)
+        cache.delete(cache_key)
+        super().delete(*args, **kwargs)
+
+    @classmethod
+    def get_cached(cls, category_id):
+        cache_key = CATEGORY_CACHE_KEY.format(id=category_id)
+        category = cache.get(cache_key)
+        if not category:
+            category = cls.objects.get(id=category_id)
+            cache.set(cache_key, category, CACHE_TTL)
+        return category
 
 class Product(models.Model):
-    """Core product model for multivendor marketplace"""
+    """Core product model with Redis caching support"""
     class Condition(models.TextChoices):
         NEW = 'NEW', _('New')
         USED = 'USED', _('Used')
@@ -140,6 +168,51 @@ class Product(models.Model):
                 self.slug = f"{base_slug}-{counter}"
                 counter += 1
         super().save(*args, **kwargs)
+        # Update cache
+        cache_key = PRODUCT_CACHE_KEY.format(id=self.id)
+        cache.set(cache_key, self, CACHE_TTL)
+        # Clear product list cache for this vendor
+        self.clear_vendor_product_cache()
+
+    def delete(self, *args, **kwargs):
+        # Clear caches
+        cache_key = PRODUCT_CACHE_KEY.format(id=self.id)
+        cache.delete(cache_key)
+        self.clear_vendor_product_cache()
+        super().delete(*args, **kwargs)
+
+    def clear_vendor_product_cache(self):
+        """Clear all cached product lists for this vendor"""
+        cache.delete_pattern(PRODUCT_LIST_CACHE_KEY.format(
+            vendor=self.vendor_id,
+            status='*',
+            page='*'
+        ))
+
+    @classmethod
+    def get_cached(cls, product_id):
+        cache_key = PRODUCT_CACHE_KEY.format(id=product_id)
+        product = cache.get(cache_key)
+        if not product:
+            product = cls.objects.select_related('vendor', 'category').get(id=product_id)
+            cache.set(cache_key, product, CACHE_TTL)
+        return product
+
+    @classmethod
+    def get_vendor_products_cached(cls, vendor_id, status=None, page=1):
+        cache_key = PRODUCT_LIST_CACHE_KEY.format(
+            vendor=vendor_id,
+            status=status or 'all',
+            page=page
+        )
+        products = cache.get(cache_key)
+        if not products:
+            queryset = cls.objects.filter(vendor_id=vendor_id)
+            if status:
+                queryset = queryset.filter(status=status)
+            products = list(queryset.order_by('-created_at'))
+            cache.set(cache_key, products, CACHE_TTL)
+        return products
 
     @property
     def is_available(self):
@@ -152,7 +225,7 @@ class Product(models.Model):
         return 0
 
 class ProductImage(models.Model):
-    """Product image gallery with ordering support"""
+    """Product image gallery with caching support"""
     product = models.ForeignKey(
         Product,
         on_delete=models.CASCADE,
@@ -180,9 +253,12 @@ class ProductImage(models.Model):
                 is_primary=True
             ).update(is_primary=False)
         super().save(*args, **kwargs)
+        # Clear product cache
+        cache_key = PRODUCT_CACHE_KEY.format(id=self.product_id)
+        cache.delete(cache_key)
 
 class ProductVariant(models.Model):
-    """Product variants like size, color etc."""
+    """Product variants with caching support"""
     product = models.ForeignKey(
         Product,
         on_delete=models.CASCADE,
@@ -207,8 +283,34 @@ class ProductVariant(models.Model):
     def __str__(self):
         return f"{self.product.name} - {self.name}"
 
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # Update variant cache
+        cache_key = PRODUCT_VARIANT_CACHE_KEY.format(id=self.id)
+        cache.set(cache_key, self, CACHE_TTL)
+        # Clear product cache
+        cache_key = PRODUCT_CACHE_KEY.format(id=self.product_id)
+        cache.delete(cache_key)
+
+    def delete(self, *args, **kwargs):
+        # Clear caches
+        cache_key = PRODUCT_VARIANT_CACHE_KEY.format(id=self.id)
+        cache.delete(cache_key)
+        cache_key = PRODUCT_CACHE_KEY.format(id=self.product_id)
+        cache.delete(cache_key)
+        super().delete(*args, **kwargs)
+
+    @classmethod
+    def get_cached(cls, variant_id):
+        cache_key = PRODUCT_VARIANT_CACHE_KEY.format(id=variant_id)
+        variant = cache.get(cache_key)
+        if not variant:
+            variant = cls.objects.select_related('product').get(id=variant_id)
+            cache.set(cache_key, variant, CACHE_TTL)
+        return variant
+
 class ProductReview(models.Model):
-    """Customer reviews for products with vendor responses"""
+    """Product reviews with caching support"""
     product = models.ForeignKey(
         Product,
         on_delete=models.CASCADE,
@@ -243,10 +345,36 @@ class ProductReview(models.Model):
         ]
 
     def __str__(self):
-        return f"Review for {self.product.name} by {self.user.email}"
+        return f"Review for {self.product.name} by {self.user.email if self.user else 'Anonymous'}"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # Update review cache
+        cache_key = PRODUCT_REVIEW_CACHE_KEY.format(id=self.id)
+        cache.set(cache_key, self, CACHE_TTL)
+        # Clear product cache to update rating
+        cache_key = PRODUCT_CACHE_KEY.format(id=self.product_id)
+        cache.delete(cache_key)
+
+    def delete(self, *args, **kwargs):
+        # Clear caches
+        cache_key = PRODUCT_REVIEW_CACHE_KEY.format(id=self.id)
+        cache.delete(cache_key)
+        cache_key = PRODUCT_CACHE_KEY.format(id=self.product_id)
+        cache.delete(cache_key)
+        super().delete(*args, **kwargs)
+
+    @classmethod
+    def get_cached(cls, review_id):
+        cache_key = PRODUCT_REVIEW_CACHE_KEY.format(id=review_id)
+        review = cache.get(cache_key)
+        if not review:
+            review = cls.objects.select_related('product', 'user').get(id=review_id)
+            cache.set(cache_key, review, CACHE_TTL)
+        return review
 
 class ProductQuestion(models.Model):
-    """Customer questions about products with vendor answers"""
+    """Product questions with caching support"""
     product = models.ForeignKey(
         Product,
         on_delete=models.CASCADE,
@@ -283,3 +411,24 @@ class ProductQuestion(models.Model):
 
     def __str__(self):
         return f"Question about {self.product.name}"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # Update question cache
+        cache_key = PRODUCT_QUESTION_CACHE_KEY.format(id=self.id)
+        cache.set(cache_key, self, CACHE_TTL)
+
+    def delete(self, *args, **kwargs):
+        # Clear cache
+        cache_key = PRODUCT_QUESTION_CACHE_KEY.format(id=self.id)
+        cache.delete(cache_key)
+        super().delete(*args, **kwargs)
+
+    @classmethod
+    def get_cached(cls, question_id):
+        cache_key = PRODUCT_QUESTION_CACHE_KEY.format(id=question_id)
+        question = cache.get(cache_key)
+        if not question:
+            question = cls.objects.select_related('product', 'user').get(id=question_id)
+            cache.set(cache_key, question, CACHE_TTL)
+        return question

@@ -57,9 +57,10 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 cache.delete(ADMIN_PROFILE_CACHE_KEY.format(id=user.id))
         return response
 
+#  
 class UserRegistrationView(generics.CreateAPIView):
     permission_classes = [permissions.AllowAny]
-
+# This view handles registration for customers, vendors, and vendor employees
     def get_serializer_class(self):
         if self.request.path.endswith('customer/'):
             return CustomerRegistrationSerializer
@@ -68,7 +69,6 @@ class UserRegistrationView(generics.CreateAPIView):
         elif self.request.path.endswith('vendor-employee/'):
             return VendorEmployeeRegistrationSerializer
         return super().get_serializer_class()
-
     @transaction.atomic
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)

@@ -2,9 +2,9 @@ import uuid
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 
 from django.db import models
-from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.core.validators import RegexValidator
+
 
 class UserManager(BaseUserManager):
     """Custom user manager for email-based authentication"""
@@ -32,8 +32,9 @@ class UserManager(BaseUserManager):
 
         return self.create_user(email, username, password, **extra_fields)
 
+
 class User(AbstractUser):
-    """Custom user model with spatial support for vendors"""
+    """Custom user model without spatial fields"""
     
     class Role(models.TextChoices):
         ADMIN = 'ADMIN', _('Admin')
@@ -69,8 +70,9 @@ class User(AbstractUser):
             self.is_verified = True
         super().save(*args, **kwargs)
 
+
 class VendorProfile(models.Model):
-    """Vendor profile with spatial business location"""
+    """Vendor profile without spatial business location"""
     
     class VerificationStatus(models.TextChoices):
         PENDING = 'PENDING', _('Pending')
@@ -92,7 +94,8 @@ class VendorProfile(models.Model):
         null=True,
         blank=True
     )
-    business_location = models.CharField(max_length=100, null=True, blank=True)
+    # Changed from spatial to simple CharField
+    business_location = models.CharField(max_length=255, null=True, blank=True)
     business_description = models.TextField(blank=True, null=True)
     business_email = models.EmailField()
     business_phone = models.CharField(max_length=20)
@@ -120,8 +123,9 @@ class VendorProfile(models.Model):
             self.business_location = self.business_address.location
         super().save(*args, **kwargs)
 
+
 class Address(models.Model):
-    """Spatial address model with one-to-one vendor relationship"""
+    """Address model without spatial fields"""
     
     class AddressType(models.TextChoices):
         HOME = 'HOME', _('Home')
@@ -145,7 +149,8 @@ class Address(models.Model):
     state = models.CharField(max_length=100)
     country = models.CharField(max_length=100)
     postal_code = models.CharField(max_length=20)
-    location = models.CharField (max_length=255, null=True, blank=True)
+    # Changed from spatial to simple CharField
+    location = models.CharField(max_length=255, null=True, blank=True)
     phone_number = models.CharField(max_length=20)
     is_default = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -160,9 +165,8 @@ class Address(models.Model):
         return f"{self.street_address}, {self.city}"
 
     def save(self, *args, **kwargs):
-        """Geocode address if location is not set"""
+        """Optional geocode hook - currently not implemented"""
         if not self.location and self.street_address:
-            # Here you would typically call a geocoding service
-            # For now, we'll just save without coordinates
+            # You can call a geocoding service here if you want
             pass
         super().save(*args, **kwargs)

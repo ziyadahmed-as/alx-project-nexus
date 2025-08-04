@@ -2,7 +2,7 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django.core.validators import MinValueValidator
 from django.utils.text import slugify
-from Users.models import VendorProfile
+from Users.models import VendorProfile, User
 import uuid
 from django.core.cache import cache
 from django.conf import settings

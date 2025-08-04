@@ -55,6 +55,13 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'MulVendorEcommerce.urls'
 
+# settings.py
+
+# Redis configuration
+REDIS_HOST = 'localhost'  # or your Redis server IP
+REDIS_PORT = 6379        # default Redis port
+REDIS_DB = 0             # default Redis database
+
 
 TEMPLATES = [
     {

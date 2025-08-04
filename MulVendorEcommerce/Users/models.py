@@ -1,6 +1,5 @@
 import uuid
 from django.contrib.auth.models import AbstractUser, BaseUserManager
-
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django.core.validators import RegexValidator
@@ -69,6 +68,116 @@ class User(AbstractUser):
             self.role = self.Role.ADMIN
             self.is_verified = True
         super().save(*args, **kwargs)
+
+
+class Customer(models.Model):
+    """Customer profile model"""
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        primary_key=True,
+        related_name='customer_profile'
+    )
+    date_of_birth = models.DateField(null=True, blank=True)
+    profile_picture = models.ImageField(upload_to='customer_profiles/', null=True, blank=True)
+    preferred_language = models.CharField(max_length=10, default='en')
+    newsletter_subscription = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _('Customer Profile')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.email} (Customer)"
+
+
+class Vendor(models.Model):
+    """Vendor model (separate from VendorProfile for additional vendor-specific data)"""
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        primary_key=True,
+        related_name='vendor'
+    )
+    company_registration_number = models.CharField(max_length=100, unique=True)
+    tax_identification_number = models.CharField(max_length=100, unique=True)
+    years_in_business = models.PositiveIntegerField(default=0)
+    accepted_terms = models.BooleanField(default=False)
+    terms_accepted_date = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _('Vendor')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.email} (Vendor)"
+
+
+class AdminProfile(models.Model):
+    """Administrator profile model"""
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        primary_key=True,
+        related_name='admin_profile'
+    )
+    department = models.CharField(max_length=100)
+    position = models.CharField(max_length=100)
+    access_level = models.PositiveIntegerField(default=1)
+    notes = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _('Admin Profile')
+        verbose_name_plural = _('Admin Profiles')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.email} (Admin)"
+
+
+class VendorEmployee(models.Model):
+    """Vendor staff/employee model"""
+    class EmployeeRole(models.TextChoices):
+        MANAGER = 'MANAGER', _('Manager')
+        STAFF = 'STAFF', _('Staff')
+        DELIVERY = 'DELIVERY', _('Delivery')
+        CUSTOMER_SERVICE = 'CUSTOMER_SERVICE', _('Customer Service')
+
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        primary_key=True,
+        related_name='vendor_employee'
+    )
+    vendor = models.ForeignKey(
+        Vendor,
+        on_delete=models.CASCADE,
+        related_name='employees'
+    )
+    employee_id = models.CharField(max_length=50, unique=True)
+    role = models.CharField(max_length=20, choices=EmployeeRole.choices, default=EmployeeRole.STAFF)
+    department = models.CharField(max_length=100, blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+    hire_date = models.DateField()
+    termination_date = models.DateField(null=True, blank=True)
+    permissions = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _('Vendor Employee')
+        verbose_name_plural = _('Vendor Employees')
+        ordering = ['vendor', '-hire_date']
+        indexes = [models.Index(fields=['vendor', 'is_active'])]
+
+    def __str__(self):
+        return f"{self.user.email} ({self.get_role_display()}) at {self.vendor.user.email}"
 
 
 class VendorProfile(models.Model):

@@ -1,81 +1,44 @@
 from django.urls import path, include
-from rest_framework import permissions
-from drf_yasg.views import get_schema_view
-from drf_yasg import openapi
-from rest_framework.routers import DefaultRouter
-from .views import (
-    CategoryViewSet,
-    ProductViewSet,
-    ProductImageViewSet,
-    ProductReviewViewSet,
-    ProductQuestionViewSet
-)
-
-# Create a router and register our viewsets
-router = DefaultRouter()
-router.register(r'categories', CategoryViewSet, basename='category')
-router.register(r'products', ProductViewSet, basename='product')
-router.register(r'product-images', ProductImageViewSet, basename='product-image')
-router.register(r'reviews', ProductReviewViewSet, basename='review')
-router.register(r'questions', ProductQuestionViewSet, basename='question')
-
-# Schema view for Swagger documentation
-schema_view = get_schema_view(
-   openapi.Info(
-      title="E-Commerce API",
-      default_version='v1',
-      description="""
-      API documentation for Multi-Vendor E-Commerce Platform.
-      
-      Features include:
-      - Product management with Redis caching
-      - Location-based product recommendations
-      - Vendor and employee permissions
-      - Product reviews and Q&A system
-      """,
-      terms_of_service="https://www.example.com/terms/",
-      contact=openapi.Contact(email="api@example.com"),
-      license=openapi.License(name="BSD License"),
-   ),
-   public=True,
-   permission_classes=(permissions.AllowAny,),
-)
+from . import views
 
 urlpatterns = [
-    # API endpoints
-    path('', include(router.urls)),
+    # Categories
+    path('categories/', views.CategoryViewSet.as_view({'get': 'list', 'post': 'create'}), name='category-list'),
+    path('categories/<slug:slug>/', views.CategoryViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='category-detail'),
+    path('categories/<slug:slug>/products/', views.CategoryViewSet.as_view({'get': 'products'}), name='category-products'),
     
-    # Swagger documentation URLs
-    path('swagger<format>/', schema_view.without_ui(cache_timeout=0), name='schema-json'),
-    path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
-    path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
+    # Products
+    path('products/', views.ProductViewSet.as_view({'get': 'list', 'post': 'create'}), name='product-list'),
+    path('products/<int:pk>/', views.ProductViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='product-detail'),
+    path('products/<int:pk>/toggle-activation/', views.ProductViewSet.as_view({'post': 'toggle_activation'}), name='product-toggle-activation'),
+    path('products/<int:pk>/similar-nearby/', views.ProductViewSet.as_view({'get': 'similar_nearby'}), name='product-similar-nearby'),
+    path('products/my-products/', views.ProductViewSet.as_view({'get': 'my_products'}), name='product-my-products'),
+    path('products/featured/', views.ProductViewSet.as_view({'get': 'featured'}), name='product-featured'),
+    path('products/popular/', views.ProductViewSet.as_view({'get': 'popular'}), name='product-popular'),
+    path('products/nearby/', views.ProductViewSet.as_view({'get': 'nearby'}), name='product-nearby'),
     
-    # Additional custom endpoints
-    path('products/<int:pk>/similar-nearby/', 
-         ProductViewSet.as_view({'get': 'similar_nearby'}), 
-         name='product-similar-nearby'),
-    path('products/nearby/', 
-         ProductViewSet.as_view({'get': 'nearby'}), 
-         name='product-nearby'),
-    path('products/featured/', 
-         ProductViewSet.as_view({'get': 'featured'}), 
-         name='product-featured'),
-    path('products/popular/', 
-         ProductViewSet.as_view({'get': 'popular'}), 
-         name='product-popular'),
-    path('products/my-products/', 
-         ProductViewSet.as_view({'get': 'my_products'}), 
-         name='product-my-products'),
-    path('categories/<slug:slug>/products/', 
-         CategoryViewSet.as_view({'get': 'products'}), 
-         name='category-products'),
-    path('product-images/product-images/', 
-         ProductImageViewSet.as_view({'get': 'product_images'}), 
-         name='product-images-list'),
-    path('reviews/<int:pk>/respond/', 
-         ProductReviewViewSet.as_view({'post': 'respond'}), 
-         name='review-respond'),
-    path('questions/<int:pk>/answer/', 
-         ProductQuestionViewSet.as_view({'post': 'answer'}), 
-         name='question-answer'),
+    # Product Images
+    path('product-images/', views.ProductImageViewSet.as_view({'get': 'list', 'post': 'create'}), name='product-image-list'),
+    path('product-images/<int:pk>/', views.ProductImageViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='product-image-detail'),
+    path('product-images/product-images/', views.ProductImageViewSet.as_view({'get': 'product_images'}), name='product-images-for-product'),
+    
+    # Reviews
+    path('reviews/', views.ProductReviewViewSet.as_view({'get': 'list', 'post': 'create'}), name='review-list'),
+    path('reviews/<int:pk>/', views.ProductReviewViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='review-detail'),
+    path('reviews/<int:pk>/respond/', views.ProductReviewViewSet.as_view({'post': 'respond'}), name='review-respond'),
+    
+    # Questions
+    path('questions/', views.ProductQuestionViewSet.as_view({'get': 'list', 'post': 'create'}), name='question-list'),
+    path('questions/<int:pk>/', views.ProductQuestionViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='question-detail'),
+    path('questions/<int:pk>/answer/', views.ProductQuestionViewSet.as_view({'post': 'answer'}), name='question-answer'),
+    
+    # Vendor Locations
+    path('vendor-locations/get-vendors-within-radius/', views.VendorLocationViewSet.as_view({'get': 'get_vendors_within_radius'}), name='vendor-locations-within-radius'),
+    path('vendor-locations/<int:pk>/get-vendor-coordinates/', views.VendorLocationViewSet.as_view({'get': 'get_vendor_coordinates'}), name='vendor-coordinates'),
+    
+    # Cache Management
+    path('cache-management/', views.CacheManagementView.as_view(), name='cache-management'),
+    
+    # API Auth
+    path('api-auth/', include('rest_framework.urls')),
 ]

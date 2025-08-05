@@ -1,21 +1,21 @@
-
+from pathlib import Path
+import os
+from dotenv import load_dotenv
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
-
+load_dotenv(os.path.join(BASE_DIR, '.env')) 
+# Load environment variables from .env file
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-^ukbxh&8r61@!_pqat&=8mw4dfs=1n5qjyyqh54o)oe1itygei'
-
+SECRET_KEY = os.getenv('SECRET_KEY')
+DEBUG = os.getenv('DEBUG') == 'True'
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS')
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Chapa payment gateway secret key
+CHAPA_SECRET_KEY = os.getenv('CHAPA_SECRET_KEY')
 
-ALLOWED_HOSTS = []
-
+# Applic
 
 # Application definition
 
@@ -176,8 +176,7 @@ REDOC_SETTINGS = {
         }
     }
 }
-
-
+ 
 # Simple JWT configuration
 # https://django-rest-framework-simplejwt.readthedocs.io/en/latest/settings.html
 from datetime import timedelta
@@ -194,12 +193,6 @@ SIMPLE_JWT = {
     'AUDIENCE': None,
     'ISSUER': None,
     
-    'AUTH_HEADER_TYPES': ('Bearer',),
-    'USER_ID_FIELD': 'id',
-    'USER_ID_CLAIM': 'user_id',
-    
-    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
-    'TOKEN_TYPE_CLAIM': 'token_type',
 }
 
 AUTH_USER_MODEL = 'Users.User'
@@ -207,12 +200,26 @@ AUTH_USER_MODEL = 'Users.User'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.sqlite3',
+#         'NAME': BASE_DIR / 'db.sqlite3',
+#     }
+# }
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'biyyo',
+        'USER': 'root',          # Replace with your MySQL username
+        'PASSWORD': '',          # Replace with your MySQL password
+        'HOST': 'localhost',     # Or your DB server IP/domain
+        'PORT': '3306',          # Default MySQL port
+        'OPTIONS': {
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+        }
     }
 }
+
 
 
 # Password validation

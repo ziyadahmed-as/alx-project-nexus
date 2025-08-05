@@ -1,32 +1,58 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from . import views
+from .views import (
+    AuthViewSet,
+    UserViewSet,
+    CustomerProfileViewSet,
+    VendorProfileViewSet,
+    AdminProfileViewSet,
+    VendorEmployeeViewSet,
+    AddressViewSet,
+    AdminUserManagementViewSet,
+    AdminVendorManagementViewSet
+)
 
+# Create router for ViewSets
 router = DefaultRouter()
-router.register(r'vendor-employees', views.VendorEmployeeViewSet, basename='vendor-employee')
-router.register(r'addresses', views.AddressViewSet, basename='address')
-router.register(r'admin/users', views.AdminUserManagementViewSet, basename='admin-user')
-router.register(r'admin/vendors', views.AdminVendorManagementViewSet, basename='admin-vendor')
+
+# Authentication routes
+router.register(r'auth', AuthViewSet, basename='auth')
+
+# User management routes
+router.register(r'users', UserViewSet, basename='user')
+
+# Profile management routes
+router.register(r'profiles/customer', CustomerProfileViewSet, basename='customer-profile')
+router.register(r'profiles/vendor', VendorProfileViewSet, basename='vendor-profile')
+router.register(r'profiles/admin', AdminProfileViewSet, basename='admin-profile')
+
+# Vendor employee routes
+router.register(r'vendor-employees', VendorEmployeeViewSet, basename='vendor-employee')
+
+# Address routes
+router.register(r'addresses', AddressViewSet, basename='address')
+
+# Admin management routes
+router.register(r'admin/users', AdminUserManagementViewSet, basename='admin-user')
+router.register(r'admin/vendors', AdminVendorManagementViewSet, basename='admin-vendor')
 
 urlpatterns = [
-    # Authentication
-    path('auth/login/', views.CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
-    
-    # Registration
-    path('register/customer/', views.UserRegistrationView.as_view(), name='register-customer'),
-    path('register/vendor/', views.UserRegistrationView.as_view(), name='register-vendor'),
-    path('register/vendor-employee/', views.UserRegistrationView.as_view(), name='register-vendor-employee'),
-    
-    # User Profiles
-    path('profile/', views.UserProfileView.as_view(), name='user-profile'),
-    path('profile/customer/', views.CustomerProfileView.as_view(), name='customer-profile'),
-    path('profile/vendor/', views.VendorView.as_view(), name='vendor-profile'),
-    path('profile/vendor/business/', views.VendorProfileView.as_view(), name='vendor-business-profile'),
-    path('profile/admin/', views.AdminProfileView.as_view(), name='admin-profile'),
-    
-    # Vendor Verification
-    path('vendors/<uuid:pk>/verify/', views.VendorVerificationView.as_view(), name='vendor-verify'),
-    
-    # Include router URLs
+    # Include all router URLs
     path('', include(router.urls)),
+    
+    # Additional custom endpoints
+    path('auth/login/', AuthViewSet.as_view({'post': 'login'}), name='auth-login'),
+    path('auth/register/', AuthViewSet.as_view({'post': 'register'}), name='auth-register'),
+    path('auth/password/reset/', AuthViewSet.as_view({'post': 'password_reset'}), name='auth-password-reset'),
+    path('auth/password/reset/confirm/', AuthViewSet.as_view({'post': 'password_reset_confirm'}), name='auth-password-reset-confirm'),
+    
+    # User-specific endpoints
+    path('users/me/', UserViewSet.as_view({'get': 'me', 'patch': 'me'}), name='user-me'),
 ]
+
+# Optional: Add JWT token endpoints if using SimpleJWT
+# from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+# urlpatterns += [
+#     path('token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+#     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+# ]

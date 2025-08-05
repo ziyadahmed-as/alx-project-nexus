@@ -11,16 +11,19 @@ import redis
 from django.conf import settings
 import math
 
-from .models import Category, Product, ProductImage, ProductReview, ProductQuestion
+from .models import Category, Product, ProductImage, ProductVariant, ProductReview, ProductQuestion
 from .serializers import (
     CategorySerializer,
     ProductSerializer,
+    ProductListSerializer,
+    ProductAdminSerializer,
     ProductImageSerializer,
+    ProductVariantSerializer,
     ProductReviewSerializer,
     ProductQuestionSerializer
 )   
 from Users.serializers import UserSerializer, VendorProfileSerializer
-from Users.models import VendorProfile
+from Users.models import Vendor
 from Users.permissions import IsVendorOwner, IsVendorEmployee, IsSuperAdmin, IsProfileOwner
 
 # Initialize Redis connection
@@ -29,6 +32,7 @@ redis_client = redis.StrictRedis(
     port=settings.REDIS_PORT,
     db=settings.REDIS_DB,
     decode_responses=True
+    
 )
 
 # Cache timeout settings (in seconds)
@@ -82,11 +86,11 @@ class GeoLocationHelper:
         Returns:
             list: List of VendorProfile objects sorted by distance (nearest first)
         """
-        vendors = VendorProfile.objects.filter(
+        vendors = Vendor.objects.filter(
             latitude__isnull=False,
             longitude__isnull=False,
             is_active=True,
-            verification_status=VendorProfile.VerificationStatus.VERIFIED
+            verification_status=Vendor.VerificationStatus.VERIFIED
         )
         
         nearby_vendors = []
@@ -130,6 +134,14 @@ class CacheSignalHandlers:
         """Invalidate cache when product images are updated"""
         cache.delete(f'product_{instance.product_id}_images')
         cache.delete(f'product_image_{instance.id}')
+
+    @staticmethod
+    @receiver(signals.post_save, sender=ProductVariant)
+    @receiver(signals.post_delete, sender=ProductVariant)
+    def invalidate_product_variant_cache(sender, instance, **kwargs):
+        """Invalidate cache when product variants are updated"""
+        cache.delete(f'product_{instance.product_id}_variants')
+        cache.delete(f'product_variant_{instance.id}')
 
     @staticmethod
     @receiver(signals.post_save, sender=Category)
@@ -235,9 +247,9 @@ class CategoryViewSet(viewsets.ModelViewSet):
             category=category,
             is_active=True,
             status=Product.Status.APPROVED
-        ).select_related('vendor', 'category')
+        ).select_related('vendor', 'category').prefetch_related('images', 'variants')
         
-        serializer = ProductSerializer(products, many=True, context={'request': request})
+        serializer = ProductListSerializer(products, many=True, context={'request': request})
         response_data = {
             'category': self.get_serializer(category).data,
             'products': serializer.data,
@@ -274,9 +286,17 @@ class ProductViewSet(viewsets.ModelViewSet):
         'price': ['gte', 'lte', 'range'],
         'created_at': ['gte', 'lte']
     }
-    search_fields = ['name', 'description', 'sku', 'vendor__business_name']
-    ordering_fields = ['price', 'created_at', 'rating', 'view_count']
+    search_fields = ['name', 'description', 'short_description', 'sku', 'vendor__user__business_name']
+    ordering_fields = ['price', 'created_at', 'rating', 'view_count', 'updated_at']
     ordering = ['-created_at']
+
+    def get_serializer_class(self):
+        """Use different serializers for different actions"""
+        if self.action == 'list':
+            return ProductListSerializer
+        elif self.request.user.is_superuser and self.action in ['retrieve', 'update', 'partial_update']:
+            return ProductAdminSerializer
+        return super().get_serializer_class()
 
     def get_permissions(self):
         """Dynamically assign permissions based on action"""
@@ -327,9 +347,9 @@ class ProductViewSet(viewsets.ModelViewSet):
     def _build_base_queryset(self):
         """Build the base queryset with related data"""
         return Product.objects.select_related(
-            'vendor', 'category'
+            'vendor', 'vendor__user', 'category', 'created_by', 'updated_by'
         ).prefetch_related(
-            'images', 'reviews', 'questions'
+            'images', 'variants', 'reviews', 'questions'
         )
 
     def _apply_user_filters(self, queryset, user):
@@ -354,7 +374,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         return queryset.filter(
             is_active=True, 
             status=Product.Status.APPROVED,
-            vendor__verification_status=VendorProfile.VerificationStatus.VERIFIED
+            vendor__verification_status=Vendor.VerificationStatus.VERIFIED
         )
 
     def retrieve(self, request, *args, **kwargs):
@@ -365,18 +385,41 @@ class ProductViewSet(viewsets.ModelViewSet):
         if cached_data:
             return Response(cached_data)
             
-        response = super().retrieve(request, *args, **kwargs)
-        cache.set(cache_key, response.data, timeout=PRODUCT_CACHE_TIMEOUT)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        
+        # Increment view count for non-owners
+        if not (request.user.is_superuser or 
+                (hasattr(request.user, 'vendor') and request.user.vendor == instance.vendor) or
+                (hasattr(request.user, 'vendor_employee') and request.user.vendor_employee.vendor == instance.vendor)):
+            instance.view_count += 1
+            instance.save()
+        
+        response = Response(serializer.data)
+        cache.set(cache_key, serializer.data, timeout=PRODUCT_CACHE_TIMEOUT)
         return response
 
     def perform_create(self, serializer):
-        """Set the vendor when creating a new product"""
-        if hasattr(self.request.user, 'vendor'):
-            serializer.save(vendor=self.request.user.vendor)
-        elif hasattr(self.request.user, 'vendor_employee'):
-            serializer.save(vendor=self.request.user.vendor_employee.vendor)
+        """Set the vendor and created_by/updated_by when creating a new product"""
+        user = self.request.user
+        if hasattr(user, 'vendor'):
+            serializer.save(
+                vendor=user.vendor,
+                created_by=user,
+                updated_by=user
+            )
+        elif hasattr(user, 'vendor_employee'):
+            serializer.save(
+                vendor=user.vendor_employee.vendor,
+                created_by=user,
+                updated_by=user
+            )
         else:
             raise PermissionDenied("You don't have permission to create products.")
+
+    def perform_update(self, serializer):
+        """Set updated_by when updating a product"""
+        serializer.save(updated_by=self.request.user)
 
     @action(detail=True, methods=['post'], permission_classes=[IsVendorOwner | IsSuperAdmin | IsVendorEmployee])
     def toggle_activation(self, request, pk=None):
@@ -393,6 +436,7 @@ class ProductViewSet(viewsets.ModelViewSet):
             product.status = Product.Status.PENDING
         elif not product.is_active:
             product.status = Product.Status.INACTIVE
+        product.updated_by = request.user
         product.save()
         return Response({'status': 'success', 'is_active': product.is_active})
 
@@ -436,8 +480,8 @@ class ProductViewSet(viewsets.ModelViewSet):
         if cached_data:
             return Response(cached_data)
             
-        featured = self.get_queryset().filter(is_featured=True)[:12]
-        serializer = self.get_serializer(featured, many=True)
+        featured = self.get_queryset().filter(is_featured=True, is_active=True, status=Product.Status.APPROVED)[:12]
+        serializer = ProductListSerializer(featured, many=True, context={'request': request})
         response_data = {
             'count': len(serializer.data),
             'results': serializer.data
@@ -460,8 +504,8 @@ class ProductViewSet(viewsets.ModelViewSet):
         if cached_data:
             return Response(cached_data)
             
-        popular = self.get_queryset().order_by('-view_count')[:12]
-        serializer = self.get_serializer(popular, many=True)
+        popular = self.get_queryset().filter(is_active=True, status=Product.Status.APPROVED).order_by('-view_count')[:12]
+        serializer = ProductListSerializer(popular, many=True, context={'request': request})
         response_data = {
             'count': len(serializer.data),
             'results': serializer.data
@@ -536,7 +580,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         product_data.sort(key=lambda x: x['distance'])
         
         # Serialize the results
-        serializer = ProductSerializer(
+        serializer = ProductListSerializer(
             [item['product'] for item in product_data],
             many=True,
             context={'request': request}
@@ -622,7 +666,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         product_data.sort(key=lambda x: x['distance'])
         
         # Serialize the results
-        serializer = ProductSerializer(
+        serializer = ProductListSerializer(
             [item['product'] for item in product_data],
             many=True,
             context={'request': request}
@@ -653,7 +697,7 @@ class ProductImageViewSet(viewsets.ModelViewSet):
     """
     
     serializer_class = ProductImageSerializer
-    queryset = ProductImage.objects.select_related('product__vendor')
+    queryset = ProductImage.objects.select_related('product__vendor', 'uploaded_by')
 
     def get_permissions(self):
         """Dynamically assign permissions based on action"""
@@ -672,7 +716,11 @@ class ProductImageViewSet(viewsets.ModelViewSet):
         if hasattr(user, 'vendor_employee'):
             return self.queryset.filter(product__vendor=user.vendor_employee.vendor)
         
-        return self.queryset.none()
+        # For non-vendor users, only show images for active, approved products
+        return self.queryset.filter(
+            product__is_active=True,
+            product__status=Product.Status.APPROVED
+        )
 
     def retrieve(self, request, *args, **kwargs):
         """Retrieve single image with caching"""
@@ -712,6 +760,86 @@ class ProductImageViewSet(viewsets.ModelViewSet):
             
         images = self.get_queryset().filter(product_id=product_id)
         serializer = self.get_serializer(images, many=True)
+        cache.set(cache_key, serializer.data, timeout=PRODUCT_CACHE_TIMEOUT)
+        return Response(serializer.data)
+
+
+class ProductVariantViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint for managing product variants.
+    
+    Provides CRUD operations for product variants with proper permissions
+    and caching for improved performance.
+    
+    Permissions:
+    - Read: Open to all
+    - Write: Vendor owners/employees or superadmins
+    """
+    
+    serializer_class = ProductVariantSerializer
+    queryset = ProductVariant.objects.select_related('product__vendor', 'created_by', 'updated_by')
+
+    def get_permissions(self):
+        """Dynamically assign permissions based on action"""
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [(IsVendorOwner|IsVendorEmployee | IsSuperAdmin)()]
+        return [permissions.IsAuthenticatedOrReadOnly()]
+
+    def get_queryset(self):
+        """Filter variants based on user permissions"""
+        user = self.request.user
+        if user.is_superuser:
+            return self.queryset.all()
+        
+        if hasattr(user, 'vendor'):
+            return self.queryset.filter(product__vendor=user.vendor)
+        if hasattr(user, 'vendor_employee'):
+            return self.queryset.filter(product__vendor=user.vendor_employee.vendor)
+        
+        # For non-vendor users, only show variants for active, approved products
+        return self.queryset.filter(
+            product__is_active=True,
+            product__status=Product.Status.APPROVED
+        )
+
+    def retrieve(self, request, *args, **kwargs):
+        """Retrieve single variant with caching"""
+        cache_key = f'product_variant_{kwargs["pk"]}'
+        cached_data = cache.get(cache_key)
+        
+        if cached_data:
+            return Response(cached_data)
+            
+        response = super().retrieve(request, *args, **kwargs)
+        cache.set(cache_key, response.data, timeout=PRODUCT_CACHE_TIMEOUT)
+        return response
+
+    @action(detail=False, methods=['get'])
+    def product_variants(self, request):
+        """
+        Get all variants for a specific product
+        
+        Parameters:
+        - product_id: ID of the product (required)
+        
+        Returns:
+        List of product variants
+        """
+        product_id = request.query_params.get('product_id')
+        if not product_id:
+            return Response(
+                {'error': 'product_id parameter is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        cache_key = f'product_{product_id}_variants'
+        cached_data = cache.get(cache_key)
+        
+        if cached_data:
+            return Response(cached_data)
+            
+        variants = self.get_queryset().filter(product_id=product_id)
+        serializer = self.get_serializer(variants, many=True)
         cache.set(cache_key, serializer.data, timeout=PRODUCT_CACHE_TIMEOUT)
         return Response(serializer.data)
 
@@ -784,7 +912,7 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
     def _build_base_queryset(self):
         """Build the base queryset with proper filters"""
         user = self.request.user
-        queryset = ProductReview.objects.select_related('user', 'product')
+        queryset = ProductReview.objects.select_related('user', 'product', 'product__vendor')
 
         if user.is_authenticated:
             if user.is_superuser:
@@ -808,6 +936,10 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
         cache.set(cache_key, response.data, timeout=REVIEW_CACHE_TIMEOUT)
         return response
 
+    def perform_create(self, serializer):
+        """Set the user when creating a new review"""
+        serializer.save(user=self.request.user, is_approved=False)
+
     @action(detail=True, methods=['post'])
     def respond(self, request, pk=None):
         """
@@ -829,6 +961,23 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
             )
         
         review.vendor_response = response_text
+        review.save()
+        
+        # Invalidate relevant caches
+        cache.delete(f'review_{review.id}')
+        cache.delete(f'product_{review.product_id}_reviews')
+        return Response(self.get_serializer(review).data)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsVendorOwner | IsSuperAdmin])
+    def approve(self, request, pk=None):
+        """
+        Approve a review (vendor owner or admin only)
+        
+        Returns:
+        The updated review with is_approved=True
+        """
+        review = self.get_object()
+        review.is_approved = True
         review.save()
         
         # Invalidate relevant caches
@@ -903,7 +1052,7 @@ class ProductQuestionViewSet(viewsets.ModelViewSet):
     def _build_base_queryset(self):
         """Build the base queryset with proper filters"""
         user = self.request.user
-        queryset = ProductQuestion.objects.select_related('user', 'product')
+        queryset = ProductQuestion.objects.select_related('user', 'product', 'answered_by', 'product__vendor')
 
         if user.is_authenticated:
             if user.is_superuser:
@@ -927,6 +1076,10 @@ class ProductQuestionViewSet(viewsets.ModelViewSet):
         cache.set(cache_key, response.data, timeout=QUESTION_CACHE_TIMEOUT)
         return response
 
+    def perform_create(self, serializer):
+        """Set the user when creating a new question"""
+        serializer.save(user=self.request.user, is_approved=False)
+
     @action(detail=True, methods=['post'])
     def answer(self, request, pk=None):
         """
@@ -949,6 +1102,23 @@ class ProductQuestionViewSet(viewsets.ModelViewSet):
         
         question.answer = answer_text
         question.answered_by = request.user
+        question.save()
+        
+        # Invalidate relevant caches
+        cache.delete(f'question_{question.id}')
+        cache.delete(f'product_{question.product_id}_questions')
+        return Response(self.get_serializer(question).data)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsVendorOwner | IsSuperAdmin])
+    def approve(self, request, pk=None):
+        """
+        Approve a question (vendor owner or admin only)
+        
+        Returns:
+        The updated question with is_approved=True
+        """
+        question = self.get_object()
+        question.is_approved = True
         question.save()
         
         # Invalidate relevant caches
@@ -990,11 +1160,11 @@ class VendorLocationViewSet(viewsets.ViewSet):
             )
         
         try:
-            vendors = VendorProfile.objects.filter(
+            vendors = Vendor.objects.filter(
                 latitude__isnull=False,
                 longitude__isnull=False,
                 is_active=True,
-                verification_status=VendorProfile.VerificationStatus.VERIFIED
+                verification_status=Vendor.VerificationStatus.VERIFIED
             )
             
             nearby_vendors = GeoLocationHelper.get_nearby_vendors(float(lat), float(lng), radius)
@@ -1021,12 +1191,12 @@ class VendorLocationViewSet(viewsets.ViewSet):
         - longitude: Vendor's longitude
         """
         try:
-            vendor = VendorProfile.objects.get(id=pk)
+            vendor = Vendor.objects.get(id=pk)
             return Response({
                 'latitude': vendor.latitude,
                 'longitude': vendor.longitude
             })
-        except VendorProfile.DoesNotExist:
+        except Vendor.DoesNotExist:
             return Response(
                 {'error': 'Vendor not found'},
                 status=status.HTTP_404_NOT_FOUND

@@ -27,6 +27,7 @@ REDIS_CONFIG = {
     'DB': os.getenv('REDIS_DB', '0'),
     'PASSWORD': os.getenv('REDIS_PASSWORD', ''),
 }
+
 # ========== ROOT URLCONF ==========
 ROOT_URLCONF = 'MulVendorEcommerce.urls'
 
@@ -35,9 +36,9 @@ ROOT_URLCONF = 'MulVendorEcommerce.urls'
 REDIS_CONFIG = {
     'ENABLED': True,  # Set to False to use local memory cache instead
     'HOST': 'localhost',  # Your Redis server host
-    'PORT': 6379,        # Your Redis server port
-    'DB': 0,             # Redis database number
-    'PASSWORD': None,    # Redis password if required
+    'PORT': 6379,         # Your Redis server port
+    'DB': 0,              # Redis database number
+    'PASSWORD': None,     # Redis password if required
 }
 
 # Cache configuration (your existing code)
@@ -77,8 +78,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'drf_yasg',
     'corsheaders',
-    'django-redis',
-    
+      
     # Local apps
     'Users',
     'products',
@@ -86,7 +86,6 @@ INSTALLED_APPS = [
     'vendors',
     'analytics',
     'notifications',
-    
 ]
 
 MIDDLEWARE = [
@@ -115,6 +114,7 @@ DATABASES = {
         }
     }
 }
+
 # ========== AUTHENTICATION ==========
 AUTH_USER_MODEL = 'Users.User'
 # ========== REST FRAMEWORK ==========
@@ -163,7 +163,7 @@ TEMPLATES = [
                 'django.contrib.messages.context_processors.messages',
             ],
         },
-    },
+    }, 
 ]
 
 # ========== INTERNATIONALIZATION ==========

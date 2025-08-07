@@ -10,10 +10,7 @@ eco/
 *.sqlite3
 *.log
 # Ignore virtual environment directories
-eco/
 biyo/
-
-
 # Ignore environment variable files
 .env
 # Ignore media files

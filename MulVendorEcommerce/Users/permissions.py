@@ -1,5 +1,6 @@
 from rest_framework.permissions import BasePermission
-
+from .models import User, Vendor
+from rest_framework import permissions
 class IsSuperAdmin(BasePermission):
     """
     Permission for superuser access.
@@ -21,7 +22,16 @@ class IsVendorOwner(BasePermission):
             and hasattr(request.user, 'vendor') 
             and getattr(obj, 'vendor', None) == request.user.vendor
         )
-
+class IsVerifiedVendor(permissions.BasePermission):
+    """Check if user is a verified vendor"""
+    
+    def has_permission(self, request, view):
+        return (
+            request.user.is_authenticated and
+            request.user.role == User.Role.VENDOR and
+            hasattr(request.user, 'vendor') and
+            request.user.vendor.verification_status == Vendor.VerificationStatus.VERIFIED
+        )
 
 class IsProfileOwner(BasePermission):
     """

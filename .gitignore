@@ -1,21 +1,108 @@
-eco/
-# Ignore Python bytecode files
-*.py[cod]
-# Ignore compiled files
-*.so
-*.pyc
-*.pyo   
-*.pyd
-*.db
-*.sqlite3
-*.log
-# Ignore virtual environment directories
-biyo/
-# Ignore environment variable files
-.env
-# Ignore media files
-media/
-# Ignore static files
-static/
-# Ignore cache directories
+### Python ###
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.manifest
+
+# Django #
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+/media/
+/staticfiles/
+
+# Backup files # 
+*.bak 
+
+### Environment ###
+.env
+.biyo
+env/
+biyo/
+env.bak/
+biyo.bak/
+pythonenv*
+
+### IDE ###
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+### Docker ###
+**/docker-compose.override.yml
+**/.dockerignore
+**/.env.local
+**/.env.*.local
+
+# Docker build files
+**/Dockerfile.dev
+**/docker-compose.dev.yml
+
+# Docker data volumes
+**/pgdata/
+**/mysql_data/
+**/redis_data/
+
+### Database ###
+*.db
+*.sql
+*.sqlite
+
+### Windows ###
+# Windows thumbnail cache files
+Thumbs.db
+ehthumbs.db
+ehthumbs_vista.db
+
+# Windows shortcuts
+*.lnk
+
+# Windows system files
+[Dd]esktop.ini
+
+### Logs ###
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+### Temp files ###
+*.tmp
+*.temp
+
+# Visual Studio Code
+.history/
+*.code-workspace
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Redis
+dump.rdb
+
+# Project-specific
+/uploaded_files/
+/tmp/

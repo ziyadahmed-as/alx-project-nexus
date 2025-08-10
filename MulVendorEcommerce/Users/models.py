@@ -9,12 +9,10 @@ from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from django.utils import timezone
 
-
 class UserManager(BaseUserManager):
-    """Advanced User Manager with caching and query optimization"""
+    """User manager with enhanced caching capabilities"""
     
     def _create_user(self, email, password=None, **extra_fields):
-        """Create user with comprehensive validation and cache management"""
         if not email:
             raise ValueError(_('The Email field must be set'))
         
@@ -22,11 +20,24 @@ class UserManager(BaseUserManager):
         user = self.model(email=email, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
-        
-        # Clear relevant caches
-        cache.delete_pattern(f'user_{user.id}_*')
-        cache.delete('all_active_users')
+        self._clear_user_caches(user)
         return user
+
+    def _clear_user_caches(self, user):
+        cache_keys = [
+            f'user_{user.id}_full',
+            f'user_{user.id}_basic',
+            f'user_{user.id}_customer',
+            f'user_{user.id}_vendor',
+            f'user_{user.id}_admin',
+            f'user_{user.id}_employee',
+            'all_active_users'
+        ]
+        for key in cache_keys:
+            cache.delete(key)
+        
+        if hasattr(cache, 'delete_pattern'):
+            cache.delete_pattern(f'user_{user.id}_*')
 
     def create_user(self, email, password=None, **extra_fields):
         extra_fields.setdefault('is_staff', False)
@@ -41,7 +52,6 @@ class UserManager(BaseUserManager):
         return self._create_user(email, password, **extra_fields)
 
     def get_by_id_cached(self, user_id):
-        """Retrieve user with cache support and fallback"""
         cache_key = f'user_{user_id}_full'
         user_data = cache.get(cache_key)
         
@@ -63,7 +73,6 @@ class UserManager(BaseUserManager):
         return user_data
 
     def _get_user_profile_data(self, user):
-        """Helper method to get profile data based on role"""
         if hasattr(user, 'customer_profile'):
             return {'customer': user.customer_profile}
         elif hasattr(user, 'vendor'):
@@ -74,9 +83,8 @@ class UserManager(BaseUserManager):
             return {'vendor_employee': user.vendor_employee}
         return None
 
-
 class User(AbstractUser):
-    """Enhanced User model with role-based access and caching"""
+    """Custom user model with role-based access"""
     
     class Role(models.TextChoices):
         ADMIN = 'ADMIN', _('Admin')
@@ -85,72 +93,35 @@ class User(AbstractUser):
         VENDOR_STAFF = 'VENDOR_STAFF', _('Vendor Staff')
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    username = models.CharField(
-        max_length=150,
-        blank=True,
-        null=True,
-        help_text=_('Optional username, defaults to email if not provided')
-    )
-    email = models.EmailField(
-        unique=True,
-        db_index=True,
-        error_messages={
-            'unique': _('A user with that email already exists.')
-        }
-    )
+    username = models.CharField(max_length=150, blank=True, null=True)
+    email = models.EmailField(unique=True, db_index=True)
     phone_number = models.CharField(
-        validators=[RegexValidator(
-            regex=r'^\+?1?\d{9,15}$',
-            message=_("Phone number must be in format: '+999999999'. Up to 15 digits.")
-        )],
         max_length=17,
         blank=True,
         null=True,
-        db_index=True
+        validators=[RegexValidator(r'^\+?1?\d{9,15}$')]
     )
-    is_verified = models.BooleanField(
-        default=False,
-        help_text=_('Designates whether the user has verified their email.')
-    )
-    role = models.CharField(
-        max_length=20,
-        choices=Role.choices,
-        default=Role.CUSTOMER,
-        db_index=True
-    )
-    last_active = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text=_('Last time the user was active on the platform')
-    )
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    is_verified = models.BooleanField(default=False)
+    role = models.CharField(max_length=20, choices=Role.choices, default=Role.CUSTOMER)
+    last_active = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['first_name', 'last_name']
-
+    
     objects = UserManager()
 
     class Meta:
-        ordering = ['-created_at']
         indexes = [
             Index(fields=['email'], name='user_email_idx'),
             Index(fields=['role', 'is_verified'], name='user_role_verified_idx'),
-            Index(fields=['last_active'], name='user_last_active_idx'),
-        ]
-        constraints = [
-            UniqueConstraint(fields=['email'], name='unique_user_email')
         ]
 
     def __str__(self):
         return self.email
 
-    @property
-    def full_name(self):
-        """Return the full name of the user"""
-        return f"{self.first_name} {self.last_name}"
-
     def save(self, *args, **kwargs):
-        """Override save with cache invalidation and role enforcement"""
         if self.is_superuser:
             self.role = self.Role.ADMIN
             self.is_verified = True
@@ -161,23 +132,57 @@ class User(AbstractUser):
         super().save(*args, **kwargs)
         self._update_caches()
 
-    def delete(self, *args, **kwargs):
-        """Override delete with comprehensive cache invalidation"""
-        cache.delete_pattern(f'user_{self.id}_*')
-        cache.delete('all_active_users')
-        super().delete(*args, **kwargs)
-
     def _update_caches(self):
-        """Update all related caches for this user"""
-        cache.set(f'user_{self.id}_basic', self, 3600)
-        if hasattr(self, 'customer_profile'):
-            cache.set(f'user_{self.id}_customer', self.customer_profile, 3600)
-        if hasattr(self, 'vendor'):
-            cache.set(f'user_{self.id}_vendor', self.vendor, 3600)
-        if hasattr(self, 'admin_profile'):
-            cache.set(f'user_{self.id}_admin', self.admin_profile, 3600)
-        if hasattr(self, 'vendor_employee'):
-            cache.set(f'user_{self.id}_employee', self.vendor_employee, 3600)
+        """Safe cache update handling"""
+        try:
+            cache.set(f'user_{self.id}_basic', self, 3600)
+            if hasattr(self, 'customer_profile'):
+                cache.set(f'user_{self.id}_customer', self.customer_profile, 3600)
+            if hasattr(self, 'vendor'):
+                cache.set(f'user_{self.id}_vendor', self.vendor, 3600)
+            if hasattr(self, 'admin_profile'):
+                cache.set(f'user_{self.id}_admin', self.admin_profile, 3600)
+            if hasattr(self, 'vendor_employee'):
+                cache.set(f'user_{self.id}_employee', self.vendor_employee, 3600)
+        except Exception:
+            pass
+
+class VendorEmployee(models.Model):
+    """Fixed VendorEmployee model with proper primary key"""
+    
+    class EmployeeRole(models.TextChoices):
+        MANAGER = 'MANAGER', _('Manager')
+        STAFF = 'STAFF', _('Staff')
+        DELIVERY = 'DELIVERY', _('Delivery')
+        CUSTOMER_SERVICE = 'CUSTOMER_SERVICE', _('Customer Service')
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        db_index=True,
+        related_name='vendor_employee',
+        help_text=_("User account associated with this employee"),
+        
+    )
+    vendor = models.ForeignKey(
+        'Vendor',
+        on_delete=models.CASCADE,
+        related_name='employees'
+    )
+    employee_id = models.CharField(max_length=50, unique=True)
+    role = models.CharField(max_length=20, choices=EmployeeRole.choices, default=EmployeeRole.STAFF)
+    is_active = models.BooleanField(default=True)
+    hire_date = models.DateField()
+    
+    class Meta:
+        indexes = [
+            Index(fields=['vendor'], name='vendor_employee_vendor_idx'),
+            Index(fields=['is_active'], name='employee_active_idx'),
+        ]
+
+    def __str__(self):
+        return f"{self.user.email} ({self.get_role_display()})"
 
 
 class CustomerProfile(models.Model):
@@ -217,6 +222,7 @@ class CustomerProfile(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
+
     class Meta:
         verbose_name = _('Customer Profile')
         verbose_name_plural = _('Customer Profiles')
@@ -270,9 +276,18 @@ class Vendor(models.Model):
         primary_key=True,
         related_name='vendor'
     )
+    company_name = models.CharField(
+        max_length=255,
+        validators=[RegexValidator(regex=r'^[A-Za-z0-9\s,.&-]+$')],
+        unique=True,
+        db_index=True,
+        help_text=_("Official name of the vendor's company"),
+        null=True,  # Allow null temporarily
+        blank=True
+    )
     company_registration_number = models.CharField(
         max_length=100,
-        unique=True,
+        unique=True,  
         db_index=True,
         help_text=_("Official company registration number")
     )
@@ -319,6 +334,7 @@ class Vendor(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
+
     class Meta:
         verbose_name = _('Vendor')
         verbose_name_plural = _('Vendors')
@@ -381,6 +397,7 @@ class AdminProfile(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
+
     class Meta:
         verbose_name = _('Admin Profile')
         verbose_name_plural = _('Admin Profiles')
@@ -399,86 +416,6 @@ class AdminProfile(models.Model):
         cache.delete(f'user_{self.user_id}_full')
         cache.delete(f'admins_{self.department}')
 
-
-class VendorEmployee(models.Model):
-    """Vendor staff/employee model with role management"""
-    
-    class EmployeeRole(models.TextChoices):
-        MANAGER = 'MANAGER', _('Manager')
-        STAFF = 'STAFF', _('Staff')
-        DELIVERY = 'DELIVERY', _('Delivery')
-        CUSTOMER_SERVICE = 'CUSTOMER_SERVICE', _('Customer Service')
-
-    user = models.OneToOneField(
-        User,
-        on_delete=models.CASCADE,
-        primary_key=True,
-        related_name='vendor_employee'
-    )
-    vendor = models.ForeignKey(
-        Vendor,
-        on_delete=models.CASCADE,
-        related_name='employees',
-        db_index=True
-    )
-    employee_id = models.CharField(
-        max_length=50,
-        unique=True,
-        help_text=_("Internal employee ID")
-    )
-    role = models.CharField(
-        max_length=20,
-        choices=EmployeeRole.choices,
-        default=EmployeeRole.STAFF,
-        db_index=True
-    )
-    department = models.CharField(
-        max_length=100,
-        blank=True,
-        null=True,
-        help_text=_("Department within the vendor organization")
-    )
-    is_active = models.BooleanField(
-        default=True,
-        db_index=True,
-        help_text=_("Whether the employee is currently active")
-    )
-    hire_date = models.DateField(
-        db_index=True,
-        help_text=_("Date when employee was hired")
-    )
-    termination_date = models.DateField(
-        null=True,
-        blank=True,
-        help_text=_("Date when employment was terminated")
-    )
-    permissions = models.JSONField(
-        default=dict,
-        help_text=_("JSON structure defining employee permissions")
-    )
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    class Meta:
-        verbose_name = _('Vendor Employee')
-        verbose_name_plural = _('Vendor Employees')
-        ordering = ['vendor', '-hire_date']
-        indexes = [
-            Index(fields=['vendor', 'is_active'], name='vendor_employee_active_idx'),
-            Index(fields=['role', 'is_active'], name='employee_role_active_idx'),
-        ]
-        constraints = [
-            UniqueConstraint(fields=['employee_id'], name='unique_employee_id')
-        ]
-
-    def __str__(self):
-        return f"{self.user.email} ({self.get_role_display()})"
-
-    def save(self, *args, **kwargs):
-        """Override save with cache invalidation"""
-        super().save(*args, **kwargs)
-        cache.delete(f'user_{self.user_id}_employee')
-        cache.delete(f'user_{self.user_id}_full')
-        cache.delete(f'vendor_{self.vendor_id}_employees')
 
 
 class Address(models.Model):
@@ -508,12 +445,7 @@ class Address(models.Model):
         blank=True,
         help_text=_("Name of the person receiving shipments")
     )
-    company_name = models.CharField(
-        max_length=100,
-        blank=True,
-        null=True,
-        help_text=_("Company name for business addresses")
-    )
+    
     street_address = models.CharField(
         max_length=255, 
         null=True, 
@@ -568,6 +500,7 @@ class Address(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
+
     class Meta:
         verbose_name = _('Address')
         verbose_name_plural = _('Addresses')
@@ -576,13 +509,6 @@ class Address(models.Model):
             Index(fields=['user', 'is_default'], name='user_default_address_idx'),
             Index(fields=['postal_code'], name='address_postal_code_idx'),
             Index(fields=['address_type'], name='address_type_idx'),
-        ]
-        constraints = [
-            UniqueConstraint(
-                fields=['user', 'address_type'],
-                condition=Q(is_default=True),
-                name='unique_default_address_per_type'
-            )
         ]
 
     def __str__(self):

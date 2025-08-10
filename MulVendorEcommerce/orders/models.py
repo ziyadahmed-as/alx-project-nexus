@@ -8,6 +8,9 @@ from django.db.models import Sum, F, Q
 from django.core.cache import cache
 from django.utils import timezone
 from decimal import Decimal
+# In orders/models.py
+from Users.models import User, Vendor
+from django.core.exceptions import ValidationError
 
 class Order(models.Model):
     """Enhanced Order model with multi-role tracking and management"""
@@ -51,6 +54,27 @@ class Order(models.Model):
     shipping_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    
+    # Notes Fields (Added to fix the serializer error)
+    customer_notes = models.TextField(blank=True, help_text=_("Notes from the customer"))
+    vendor_notes = models.TextField(blank=True, help_text=_("Internal notes for vendor"))
+    admin_notes = models.TextField(blank=True, help_text=_("Notes for administrators"))
+    
+    # Address Fields
+    shipping_address = models.ForeignKey(
+        'Users.Address', 
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='shipping_orders'
+    )
+    billing_address = models.ForeignKey(
+        'Users.Address',  
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='billing_orders'
+    )
     
     # Tracking Fields
     assigned_to = models.ForeignKey(
@@ -132,84 +156,19 @@ class Order(models.Model):
         for key in cache_keys:
             cache.set(key, self, 3600)
 
-    def get_status_actions(self, user):
-        """Get available status actions based on user role"""
-        actions = []
-        
-        if user.is_superuser or hasattr(user, 'admin_profile'):
-            # Admin can do anything
-            actions = [choice[0] for choice in self.Status.choices]
-        
-        elif hasattr(user, 'vendor') and user.vendor == self.vendor:
-            # Vendor owner
-            if self.status == self.Status.PAYMENT_RECEIVED:
-                actions = [self.Status.PROCESSING, self.Status.ON_HOLD]
-            elif self.status == self.Status.PROCESSING:
-                actions = [self.Status.READY_FOR_SHIPMENT, self.Status.ON_HOLD]
-            elif self.status == self.Status.READY_FOR_SHIPMENT:
-                actions = [self.Status.SHIPPED]
-            elif self.status == self.Status.SHIPPED:
-                actions = [self.Status.OUT_FOR_DELIVERY]
-            elif self.status == self.Status.OUT_FOR_DELIVERY:
-                actions = [self.Status.DELIVERED]
-            elif self.status == self.Status.RETURN_REQUESTED:
-                actions = [self.Status.RETURN_APPROVED, self.Status.CANCELLED]
-        
-        elif hasattr(user, 'vendor_employee') and user.vendor_employee.vendor == self.vendor:
-            # Vendor employee with permissions
-            if user.vendor_employee.role in ['MANAGER', 'CUSTOMER_SERVICE']:
-                if self.status == self.Status.PAYMENT_RECEIVED:
-                    actions = [self.Status.PROCESSING]
-                elif self.status == self.Status.PROCESSING:
-                    actions = [self.Status.READY_FOR_SHIPMENT]
-                elif self.status == self.Status.READY_FOR_SHIPMENT:
-                    actions = [self.Status.SHIPPED]
-        
-        return actions
-
-    def assign_to_employee(self, employee, assigned_by):
-        """Assign order to a vendor employee"""
-        if not hasattr(employee, 'vendor_employee') or employee.vendor_employee.vendor != self.vendor:
-            raise ValidationError(_("Cannot assign to employee from another vendor"))
-        
-        self.assigned_to = employee
-        self.last_updated_by = assigned_by
-        self.save()
-        
-        # Create assignment history record
-        OrderAssignmentHistory.objects.create(
-            order=self,
-            assigned_to=employee,
-            assigned_by=assigned_by
-        )
-
-    def update_status(self, new_status, changed_by, note=None):
-        """Update order status with validation"""
-        if new_status not in self.get_status_actions(changed_by):
-            raise ValidationError(_("Invalid status transition for this user role"))
-        
-        old_status = self.status
-        self.status = new_status
-        self.last_updated_by = changed_by
-        self.save()
-        
-        # Create status history record
-        OrderStatusHistory.objects.create(
-            order=self,
-            old_status=old_status,
-            new_status=new_status,
-            changed_by=changed_by,
-            note=note
-        )
-
+    def clean(self):
+        """Validate model before saving"""
+        if self.billing_address and self.shipping_address:
+            if self.billing_address.user != self.customer or self.shipping_address.user != self.customer:
+                raise ValidationError(_("Addresses must belong to the customer"))
 
 class OrderItem(models.Model):
     """Order line items with role-based visibility"""
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='items')
-    product = models.ForeignKey('Products.Product', on_delete=models.PROTECT)
-    variant = models.ForeignKey('Products.ProductVariant', on_delete=models.PROTECT, null=True, blank=True)
+    product = models.ForeignKey('products.Product', on_delete=models.PROTECT)
+    variant = models.ForeignKey('products.ProductVariant', on_delete=models.PROTECT, null=True, blank=True)
     quantity = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
-    price = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(0.01)])
+    price = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
     tax_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
@@ -228,6 +187,11 @@ class OrderItem(models.Model):
     def save(self, *args, **kwargs):
         self.total = (self.price * self.quantity) + self.tax_amount - self.discount_amount
         super().save(*args, **kwargs)
+
+    def clean(self):
+        """Validate product belongs to order vendor"""
+        if self.product.vendor != self.order.vendor:
+            raise ValidationError(_("Product must belong to the order's vendor"))
 
 
 class OrderStatusHistory(models.Model):
@@ -324,8 +288,53 @@ class OrderPermission(models.Model):
     def __str__(self):
         return f"Permissions for {self.get_role_display()}"
 
+class VendorOrderAnalytics(models.Model):
+    vendor = models.OneToOneField(Vendor, on_delete=models.CASCADE, related_name='order_analytics')
+    total_orders = models.PositiveIntegerField(default=0)
+    total_revenue = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    average_order_value = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    total_items_sold = models.PositiveIntegerField(default=0)
+    last_updated = models.DateTimeField(auto_now=True)
 
-# Signal handlers for order management
+    class Meta:
+        verbose_name_plural = "Vendor Order Analytics"
+    def update_analytics(self):
+        """Update analytics based on current orders"""
+        orders = self.vendor.vendor_orders.filter(status__in=[
+            Order.Status.DELIVERED, Order.Status.REFUNDED, Order.Status.CANCELLED
+        ])
+
+    def __str__(self):
+        return f"Analytics for {self.vendor.user.business_name}"
+        self.total_orders = orders.count()
+        self.total_revenue = orders.aggregate(total=Sum('total'))['total'] or Decimal('0.00')
+        self.average_order_value = (self.total_revenue / self.total_orders) if self.total_orders else Decimal('0.00')
+        self.total_items_sold = orders.aggregate(total=Sum('items__quantity'))['total'] or 0
+        self.save() 
+        return f"Analytics for {self.vendor.user.business_name}"
+    
+    def clean(self):
+        """Validate that vendor exists and has orders"""
+        if not self.vendor or not self.vendor.vendor_orders.exists():
+            raise ValidationError(_("Vendor must have at least one order to create analytics"))
+        return bool(
+            self.vendor and self.vendor.vendor_orders.exists()
+        )
+    def has_permission(self, request, view):
+        """Check if user has permission to view vendor orders"""    
+        if request.user.is_superuser:
+            return True
+        if hasattr(request.user, 'vendor_employee'):
+            return request.user.vendor_employee.vendor == self.vendor   
+        return False
+        return bool(
+            request.user.is_authenticated and
+            hasattr(request.user, 'vendor') and
+            request.user.vendor == self.vendor
+        )   
+        
+             
+# Signal handlers
 @receiver(post_save, sender=Order)
 def handle_order_status_change(sender, instance, **kwargs):
     """Handle notifications and workflows when order status changes"""
@@ -343,15 +352,18 @@ def setup_employee_permissions(sender, instance, created, **kwargs):
             # Apply permissions to employee
         except OrderPermission.DoesNotExist:
             pass
+
+
 @receiver(post_save, sender='Users.Vendor')
 def setup_vendor_order_dashboard(sender, instance, created, **kwargs):
     """Set up default order dashboard for new vendors"""
     if created:
-        VendorOrderDashboard.objects.create(vendor=instance,
+        VendorOrderDashboard.objects.create(
+            vendor=instance,
             default_status_filter=Order.Status.PROCESSING,
             show_unassigned_orders=True,
             show_assigned_to_others=False,
-            notify_new_orders=True,     
+            notify_new_orders=True,
             notify_assigned_orders=True,
             notify_status_changes=True
-        )   
+        )

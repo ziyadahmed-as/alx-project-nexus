@@ -123,7 +123,8 @@ class CacheSignalHandlers:
             f'products_vendor_{instance.vendor_id}',
             'featured_products',
             'popular_products',
-            'all_active_products'
+            'all_active_products',
+            'above_rating_*'  # Add pattern for above rating cache keys
         ]
         cache.delete_many(keys_to_delete)
 
@@ -269,6 +270,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     - Location-based product discovery
     - Featured and popular products
     - Vendor-specific product management
+    - Above rating products
     
     Permissions:
     - Read operations: Open to all
@@ -284,7 +286,8 @@ class ProductViewSet(viewsets.ModelViewSet):
         'is_active': ['exact'],
         'status': ['exact'],
         'price': ['gte', 'lte', 'range'],
-        'created_at': ['gte', 'lte']
+        'created_at': ['gte', 'lte'],
+        'rating': ['gte', 'lte']  # Added rating filter
     }
     search_fields = ['name', 'description', 'short_description', 'sku', 'vendor__user__business_name']
     ordering_fields = ['price', 'created_at', 'rating', 'view_count', 'updated_at']
@@ -510,6 +513,73 @@ class ProductViewSet(viewsets.ModelViewSet):
             'count': len(serializer.data),
             'results': serializer.data
         }
+        cache.set(cache_key, response_data, timeout=PRODUCT_LIST_CACHE_TIMEOUT)
+        return Response(response_data)
+
+    @action(detail=False, methods=['get'])
+    def above_rating(self, request):
+        """
+        Get products above a specified rating threshold
+        
+        Parameters:
+        - rating: Minimum rating threshold (required, between 1 and 5)
+        - limit: Maximum number of products to return (optional)
+        
+        Returns:
+        - count: Number of products above the rating
+        - results: List of products with ratings above the threshold
+        """
+        rating = request.query_params.get('rating')
+        
+        if not rating:
+            return Response(
+                {'error': 'Rating parameter is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            rating = float(rating)
+            if rating < 1 or rating > 5:
+                raise ValueError
+        except ValueError:
+            return Response(
+                {'error': 'Rating must be a number between 1 and 5'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        limit = request.query_params.get('limit')
+        try:
+            limit = int(limit) if limit else None
+        except ValueError:
+            return Response(
+                {'error': 'Limit must be an integer'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Generate cache key
+        cache_key = f'above_rating_{rating}_{limit if limit else "all"}'
+        cached_data = cache.get(cache_key)
+        
+        if cached_data:
+            return Response(cached_data)
+        
+        # Get products above the rating threshold
+        products = self.get_queryset().filter(
+            rating__gte=rating,
+            is_active=True,
+            status=Product.Status.APPROVED
+        ).order_by('-rating')
+        
+        if limit:
+            products = products[:limit]
+        
+        serializer = ProductListSerializer(products, many=True, context={'request': request})
+        response_data = {
+            'count': len(serializer.data),
+            'results': serializer.data,
+            'rating_threshold': rating
+        }
+        
         cache.set(cache_key, response_data, timeout=PRODUCT_LIST_CACHE_TIMEOUT)
         return Response(response_data)
 
@@ -1234,6 +1304,7 @@ class CacheManagementView(APIView):
         elif action == 'clear_products':
             cache.delete_pattern('product_*')
             cache.delete_pattern('products_*')
+            cache.delete_pattern('above_rating_*')
             return Response({'status': 'Product cache cleared'})
         
         elif action == 'clear_categories':

@@ -2,29 +2,52 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from . import views
 
-# Setup automatic URL routing for all ViewSets
 router = DefaultRouter()
-router.register('orders', views.OrderViewSet)  # Handles /orders/
-router.register('order-items', views.OrderItemViewSet)  # Handles /order-items/
-router.register('order-history', views.OrderStatusHistoryViewSet)  # /order-history/
-router.register('order-assignments', views.OrderAssignmentHistoryViewSet)  # /order-assignments/
-router.register('vendor-dashboards', views.VendorOrderDashboardViewSet)  # /vendor-dashboards/
-router.register('order-permissions', views.OrderPermissionViewSet)  # /order-permissions/
 
-# Custom URL patterns
+# Register all ViewSets with the router
+router.register(r'orders', views.OrderViewSet, basename='order')
+router.register(r'order-items', views.OrderItemViewSet, basename='orderitem')
+router.register(r'order-status-history', views.OrderStatusHistoryViewSet, basename='orderstatushistory')
+router.register(r'order-assignment-history', views.OrderAssignmentHistoryViewSet, basename='orderassignmenthistory')
+router.register(r'vendor-dashboards', views.VendorOrderDashboardViewSet, basename='vendordashboard')
+router.register(r'vendor-analytics', views.VendorOrderAnalyticsViewSet, basename='vendoranalytics')
+router.register(r'order-permissions', views.OrderPermissionViewSet, basename='orderpermission')
+router.register(r'order-addresses', views.OrderAddressViewSet, basename='orderaddress')  # Changed from 'addresses'
+
+# Additional URL patterns for custom actions and APIViews
 urlpatterns = [
     path('', include(router.urls)),
     
-    # Order related custom endpoints
-    path('orders/summary/', views.OrderViewSet.as_view({'get': 'summary'})),
-    path('orders/export/', views.OrderViewSet.as_view({'get': 'export'})),
-    path('orders/recent/', views.OrderViewSet.as_view({'get': 'recent'})),
-    path('orders/vendor-dashboard/', views.OrderViewSet.as_view({'get': 'vendor_dashboard'})),
+    # Cache management endpoint
+    path('cache-management/', views.CacheManagementView.as_view(), name='cache-management'),
     
-    # Single order actions
-    path('orders/<int:pk>/update-status/', views.OrderViewSet.as_view({'post': 'update_status'})),
-    path('orders/<int:pk>/assign/', views.OrderViewSet.as_view({'post': 'assign'})),
+    # Nested routes for order items
+    path('orders/<int:order_id>/items/', 
+         views.OrderItemViewSet.as_view({
+             'get': 'list', 
+             'post': 'create'
+         }), 
+         name='order-items-list'),
     
-    # Cache management
-    path('clear-cache/', views.CacheManagementView.as_view()),
+    # Custom action endpoints for orders
+    path('orders/summary/', 
+         views.OrderViewSet.as_view({'get': 'summary'}), 
+         name='order-summary'),
+    path('orders/recent/', 
+         views.OrderViewSet.as_view({'get': 'recent'}), 
+         name='recent-orders'),
+    path('orders/vendor-dashboard/', 
+         views.OrderViewSet.as_view({'get': 'vendor_dashboard'}), 
+         name='vendor-dashboard'),
+    path('orders/<int:pk>/update-status/', 
+         views.OrderViewSet.as_view({'post': 'update_status'}), 
+         name='order-update-status'),
+    path('orders/<int:pk>/assign/', 
+         views.OrderViewSet.as_view({'post': 'assign'}), 
+         name='order-assign'),
+]
+
+# Include DRF auth URLs if needed
+urlpatterns += [
+    path('api-auth/', include('rest_framework.urls')),
 ]

@@ -99,7 +99,7 @@ class Product(models.Model):
         db_index=True
     )
     name = models.CharField(max_length=255, db_index=True)
-    slug = models.SlugField(max_length=300, unique=True, blank=True, db_index=True)
+    slug = models.SlugField(max_length=255, unique=True, blank=True, db_index=True)
     description = models.TextField()
     short_description = models.CharField(max_length=200, blank=True)
     sku = models.CharField(max_length=100, unique=True, db_index=True)

@@ -3,18 +3,85 @@
 This backend system powers a full-featured multivendor e-commerce platform with comprehensive product management capabilities. Built with Django REST Framework, it provides secure, scalable APIs for marketplace operations including product catalog management, inventory control, customer reviews, and geolocation-based discovery.
 
 ## Core Modules
-1. Product Catalog System
-Endpoints:
+Core Modules
+## 1. User Management Module
+Purpose: Secure authentication and role-based access control
+Key Features:
+JWT authentication (access/refresh tokens)
+Multi-role registration (Customer/Vendor/Admin)
+Email verification workflow
 
-GET /api/products/ - Browse products with advanced filtering
+5-tier RBAC system:
+Super Admin (Full access)
+Vendor (Store management)
+Vendor Staff (Limited permissions)
+Customer (Purchasing)
+Delivery (Logistics)
+## Technical Implementation:
 
-GET /api/products/featured/ - Featured products
+Password hashing with PBKDF2
+Session management with Redis
+Suspicious activity monitoring
+OAuth2.0 ready
 
-GET /api/products/popular/ - Most viewed products
+## Key Endpoints:
 
-GET /api/products/above_rating/ - Products above rating threshold
+http
+POST /api/auth/register/customer
+POST /api/auth/register/vendor
+POST /api/auth/login
+GET/PATCH /api/users/me
+GET /api/admin/users
+## 2. Product Management Module
+Purpose: Multivendor catalog with advanced discovery
+Key Features:
+Hierarchical category system (MPTT)
+Product variants/options management
+Geolocation search (50km radius)
+Redis-cached listings (15min TTL)
+Automated approval workflow:
+Pending → Approved → Archived
 
-GET /api/products/nearby/ - Location-based product discovery
+## Performance Optimizations:
+Select/prefetch related queries
+CDN-hosted media
+Materialized views for analytics
+Elasticsearch integration
+
+## Key Endpoints:
+
+http
+GET /api/products?lat=9.145&lng=40.4897&radius=50
+GET /api/products/above_rating?rating=4
+POST /api/vendor/products
+GET /api/categories/{slug}/products
+## 3. Order Management Module
+Purpose: Transaction processing and fulfillment
+Key Features:
+
+## State machine workflow:
+
+Pending → Paid → Shipped → Delivered → Refunded
+Split payment system:
+Instant platform commission
+Scheduled vendor payouts
+
+Integrated logistics:
+FedEx/DHL APIs
+Real-time tracking
+
+## Financial Components:
+
+Tax calculation (Avalara/TaxJar)
+Dispute resolution system
+Payout scheduling (Daily/Weekly)
+
+## Key Endpoints:
+
+http
+POST /api/orders/checkout
+GET /api/orders/{id}/track
+POST /api/vendor/payouts
 
 ## Features:
 

@@ -27,6 +27,12 @@ class VendorListView(generics.ListAPIView):
     filterset_fields = ['status']
     search_fields = ['business_name', 'business_description']
 
+class VendorPublicDetailView(generics.RetrieveAPIView):
+    """Public vendor storefront - anyone can view approved vendors"""
+    queryset = VendorProfile.objects.filter(status='approved')
+    serializer_class = VendorProfileSerializer
+    permission_classes = [permissions.AllowAny]
+
 class VendorManagementView(generics.ListAPIView):
     queryset = VendorProfile.objects.all()
     serializer_class = VendorProfileSerializer

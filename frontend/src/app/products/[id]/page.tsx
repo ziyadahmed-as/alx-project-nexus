@@ -9,6 +9,7 @@ import { useAuthStore } from '@/store/authStore';
 import toast from 'react-hot-toast';
 import Navbar from '@/components/Navbar';
 import SocialShare from '@/components/SocialShare';
+import ProductCard from '@/components/ProductCard';
 
 export default function ProductDetailPage() {
   const params = useParams();
@@ -16,6 +17,7 @@ export default function ProductDetailPage() {
   const addItem = useCartStore((state) => state.addItem);
   const { user, isAuthenticated } = useAuthStore();
   const [product, setProduct] = useState<any>(null);
+  const [recommendations, setRecommendations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [quantity, setQuantity] = useState(1);
   const [selectedImage, setSelectedImage] = useState(0);
@@ -23,7 +25,8 @@ export default function ProductDetailPage() {
 
   useEffect(() => {
     fetchProduct();
-  }, []);
+    fetchRecommendations();
+  }, [params.id]);
 
   const fetchProduct = async () => {
     try {
@@ -49,6 +52,15 @@ export default function ProductDetailPage() {
       toast.error('Product not found');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchRecommendations = async () => {
+    try {
+      const response = await api.get(`/products/${params.id}/recommendations/`);
+      setRecommendations(response.data);
+    } catch (error) {
+      console.error('Error fetching recommendations:', error);
     }
   };
 
@@ -356,12 +368,29 @@ export default function ProductDetailPage() {
         )}
 
         {/* Reviews Section */}
-        <div className="bg-white rounded-lg shadow-md p-6">
+        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
           <h2 className="text-2xl font-bold mb-4">Customer Reviews</h2>
           <div className="text-center py-12 text-gray-500">
             <p>No reviews yet. Be the first to review this product!</p>
           </div>
         </div>
+
+        {/* Recommendations Section */}
+        {recommendations.length > 0 && (
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold">You May Also Like</h2>
+              <Link href="/products" className="text-primary hover:underline font-medium">
+                View All →
+              </Link>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
+              {recommendations.map((rec: any) => (
+                <ProductCard key={rec.id} product={rec} />
+              ))}
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

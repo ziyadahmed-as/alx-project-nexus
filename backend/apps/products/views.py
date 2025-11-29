@@ -5,6 +5,7 @@ from django.core.cache import cache
 from .models import Category, Product, ProductImage
 from .serializers import CategorySerializer, ProductSerializer, ProductImageSerializer
 from apps.vendors.permissions import IsVendor
+from .recommendations import ProductRecommendations
 
 class CategoryListView(generics.ListCreateAPIView):
     queryset = Category.objects.filter(is_active=True)
@@ -114,3 +115,58 @@ class VendorProductListView(generics.ListAPIView):
         except:
             # User doesn't have a vendor profile yet
             return Product.objects.none()
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def product_recommendations(request, pk):
+    """Get recommendations for a specific product"""
+    try:
+        product = Product.objects.get(pk=pk, is_active=True, status='published')
+        recommendations = ProductRecommendations.get_you_may_also_like(
+            product, 
+            user=request.user if request.user.is_authenticated else None,
+            limit=8
+        )
+        serializer = ProductSerializer(recommendations, many=True)
+        return Response(serializer.data)
+    except Product.DoesNotExist:
+        return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def similar_products(request, pk):
+    """Get similar products"""
+    try:
+        product = Product.objects.get(pk=pk, is_active=True, status='published')
+        similar = ProductRecommendations.get_similar_products(product, limit=8)
+        serializer = ProductSerializer(similar, many=True)
+        return Response(serializer.data)
+    except Product.DoesNotExist:
+        return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def trending_products(request):
+    """Get trending products"""
+    trending = ProductRecommendations.get_trending_products(limit=12)
+    serializer = ProductSerializer(trending, many=True)
+    return Response(serializer.data)
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def best_sellers(request):
+    """Get best selling products"""
+    best_sellers = ProductRecommendations.get_best_sellers(limit=12)
+    serializer = ProductSerializer(best_sellers, many=True)
+    return Response(serializer.data)
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def personalized_recommendations(request):
+    """Get personalized recommendations for the user"""
+    recommendations = ProductRecommendations.get_personalized_recommendations(
+        user=request.user if request.user.is_authenticated else None,
+        limit=12
+    )
+    serializer = ProductSerializer(recommendations, many=True)
+    return Response(serializer.data)

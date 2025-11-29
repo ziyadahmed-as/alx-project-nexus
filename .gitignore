@@ -1,0 +1,84 @@
+# Root .gitignore for Multivendor E-commerce Platform
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+*.env
+
+# Database
+*.sqlite3
+*.db
+
+# Logs
+*.log
+logs/
+
+# OS Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Backup files
+*.bak
+*~
+
+# Security sensitive files
+*.pem
+*.key
+*.crt
+secrets.json
+
+# Documentation builds
+docs/_build/
+site/
+
+# Coverage reports
+htmlcov/
+coverage/
+.coverage
+
+# Project specific
+/media/
+/staticfiles/
+node_modules/
+.next/
+__pycache__/
+venv/
+env/
+
+# Build outputs
+dist/
+build/
+out/
+
+# Package manager files
+package-lock.json
+yarn.lock
+Pipfile.lock
+poetry.lock
+
+# Testing
+.pytest_cache/
+.coverage
+*.test.js.snap
+
+# Deployment
+.vercel
+.netlify
+
+# Local development notes
+TODO.md
+NOTES.md
+scratch.txt

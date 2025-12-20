@@ -47,6 +47,33 @@ export default function AdminVendorsPage() {
     }
   };
 
+  const handleSuspendVendor = async (vendorId: number) => {
+    const reason = prompt('Please enter the reason for suspension:');
+    if (!reason) return;
+    
+    try {
+      await api.post(`/vendors/${vendorId}/suspend/`, { reason });
+      toast.success('Vendor suspended successfully');
+      fetchVendors();
+    } catch (error) {
+      console.error('Error suspending vendor:', error);
+      toast.error('Failed to suspend vendor');
+    }
+  };
+
+  const handleActivateVendor = async (vendorId: number) => {
+    if (!confirm('Are you sure you want to activate this vendor?')) return;
+    
+    try {
+      await api.post(`/vendors/${vendorId}/activate/`);
+      toast.success('Vendor activated successfully');
+      fetchVendors();
+    } catch (error) {
+      console.error('Error activating vendor:', error);
+      toast.error('Failed to activate vendor');
+    }
+  };
+
   const handleDeleteVendor = async (vendorId: number) => {
     if (!confirm('Are you sure you want to delete this vendor? This action cannot be undone.')) return;
     
@@ -164,6 +191,7 @@ export default function AdminVendorsPage() {
                   <option value="pending">Pending</option>
                   <option value="approved">Approved</option>
                   <option value="rejected">Rejected</option>
+                  <option value="suspended">Suspended</option>
                 </select>
               </div>
 
@@ -218,16 +246,24 @@ export default function AdminVendorsPage() {
                             {vendor.office_city ? `${vendor.office_city}, ${vendor.office_country}` : 'N/A'}
                           </td>
                           <td className="py-3 px-4">
-                            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                              vendor.status === 'approved' ? 'bg-green-100 text-green-800' :
-                              vendor.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                              'bg-red-100 text-red-800'
-                            }`}>
-                              {vendor.status.charAt(0).toUpperCase() + vendor.status.slice(1)}
-                            </span>
+                            <div className="flex flex-col gap-1">
+                              <span className={`px-3 py-1 rounded-full text-xs font-semibold inline-block ${
+                                vendor.status === 'approved' ? 'bg-green-100 text-green-800' :
+                                vendor.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                                vendor.status === 'suspended' ? 'bg-orange-100 text-orange-800' :
+                                'bg-red-100 text-red-800'
+                              }`}>
+                                {vendor.status.charAt(0).toUpperCase() + vendor.status.slice(1)}
+                              </span>
+                              {!vendor.is_active && (
+                                <span className="px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-800 inline-block">
+                                  Inactive
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="py-3 px-4">
-                            <div className="flex justify-center gap-2">
+                            <div className="flex justify-center gap-2 flex-wrap">
                               <button
                                 onClick={() => router.push(`/admin/vendors/${vendor.id}`)}
                                 className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"
@@ -238,6 +274,7 @@ export default function AdminVendorsPage() {
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                                 </svg>
                               </button>
+                              
                               {vendor.status === 'pending' && (
                                 <>
                                   <button
@@ -260,6 +297,30 @@ export default function AdminVendorsPage() {
                                   </button>
                                 </>
                               )}
+                              
+                              {/* Suspend/Activate Buttons */}
+                              {vendor.status === 'suspended' || !vendor.is_active ? (
+                                <button
+                                  onClick={() => handleActivateVendor(vendor.id)}
+                                  className="p-2 text-green-600 hover:bg-green-50 rounded-lg"
+                                  title="Activate Vendor"
+                                >
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  </svg>
+                                </button>
+                              ) : vendor.status === 'approved' && vendor.is_active && (
+                                <button
+                                  onClick={() => handleSuspendVendor(vendor.id)}
+                                  className="p-2 text-orange-600 hover:bg-orange-50 rounded-lg"
+                                  title="Suspend Vendor"
+                                >
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                  </svg>
+                                </button>
+                              )}
+                              
                               <button
                                 onClick={() => handleDeleteVendor(vendor.id)}
                                 className="p-2 text-red-600 hover:bg-red-50 rounded-lg"

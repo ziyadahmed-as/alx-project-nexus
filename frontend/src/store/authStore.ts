@@ -11,6 +11,8 @@ interface User {
   phone?: string;
   avatar?: string;
   is_verified?: boolean;
+  kyc_status: 'pending' | 'under_review' | 'approved' | 'rejected';
+  email_verified: boolean;
   created_at?: string;
 }
 
@@ -21,12 +23,14 @@ interface AuthState {
   register: (data: any) => Promise<void>;
   logout: () => void;
   fetchUser: () => Promise<void>;
+  requestPasswordReset: (email: string) => Promise<void>;
+  confirmPasswordReset: (data: any) => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isAuthenticated: false,
-  
+
   login: async (username, password) => {
     const response = await api.post('/auth/login/', { username, password });
     if (typeof window !== 'undefined') {
@@ -36,11 +40,11 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ user: response.data.user, isAuthenticated: true });
     return response.data.user;
   },
-  
+
   register: async (data) => {
     await api.post('/auth/register/', data);
   },
-  
+
   logout: () => {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('access_token');
@@ -48,7 +52,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
     set({ user: null, isAuthenticated: false });
   },
-  
+
   fetchUser: async () => {
     try {
       const response = await api.get('/auth/profile/');
@@ -56,5 +60,13 @@ export const useAuthStore = create<AuthState>((set) => ({
     } catch (error) {
       set({ user: null, isAuthenticated: false });
     }
+  },
+
+  requestPasswordReset: async (email) => {
+    await api.post('/auth/password-reset/', { email });
+  },
+
+  confirmPasswordReset: async (data) => {
+    await api.post('/auth/password-reset/confirm/', data);
   },
 }));

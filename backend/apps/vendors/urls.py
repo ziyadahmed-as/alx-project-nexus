@@ -1,7 +1,7 @@
 from django.urls import path
 from .views import (
     VendorProfileCreateView, VendorProfileDetailView, VendorPublicDetailView,
-    VendorListView, VendorManagementView, verify_vendor
+    VendorListView, VendorManagementView, verify_vendor, suspend_vendor, activate_vendor
 )
 
 urlpatterns = [
@@ -11,4 +11,6 @@ urlpatterns = [
     path('manage/', VendorManagementView.as_view(), name='vendor-manage'),
     path('<int:pk>/', VendorPublicDetailView.as_view(), name='vendor-public-detail'),
     path('<int:pk>/verify/', verify_vendor, name='vendor-verify'),
+    path('<int:pk>/suspend/', suspend_vendor, name='vendor-suspend'),
+    path('<int:pk>/activate/', activate_vendor, name='vendor-activate'),
 ]

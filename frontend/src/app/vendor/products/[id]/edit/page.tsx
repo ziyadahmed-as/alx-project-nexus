@@ -28,9 +28,23 @@ export default function EditProductPage() {
   const fetchProduct = async () => {
     try {
       const response = await api.get(`/products/${params.id}/`);
-      setFormData(response.data);
+      const productData = response.data;
+      
+      // Verify this product belongs to the current vendor
+      const myProductsResponse = await api.get('/products/my-products/');
+      const myProducts = myProductsResponse.data.results || myProductsResponse.data;
+      const isMyProduct = myProducts.some((p: any) => p.id === parseInt(params.id as string));
+      
+      if (!isMyProduct) {
+        toast.error('You do not have permission to edit this product');
+        router.push('/vendor/dashboard');
+        return;
+      }
+      
+      setFormData(productData);
     } catch (error) {
       toast.error('Failed to load product');
+      router.push('/vendor/dashboard');
     }
   };
 

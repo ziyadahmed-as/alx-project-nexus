@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import ProductCard from '@/components/ProductCard';
 import Navbar from '@/components/Navbar';
+import LocationMapFilter from '@/components/LocationMapFilter';
 
 export default function ProductsPage() {
   const [products, setProducts] = useState([]);
@@ -23,8 +24,15 @@ export default function ProductsPage() {
     category: '',
     dateFrom: '',
     dateTo: '',
-    search: ''
+    search: '',
+    city: '',
+    state: '',
+    country: '',
+    lat: null as number | null,
+    lng: null as number | null,
+    radius: null as number | null,
   });
+  const [showMapFilter, setShowMapFilter] = useState(false);
 
   useEffect(() => {
     fetchCategories();
@@ -64,6 +72,16 @@ export default function ProductsPage() {
       if (filters.location) params.append('location', filters.location);
       if (filters.dateFrom) params.append('date_from', filters.dateFrom);
       if (filters.dateTo) params.append('date_to', filters.dateTo);
+      
+      // Add location-based filters
+      if (filters.city) params.append('city', filters.city);
+      if (filters.state) params.append('state', filters.state);
+      if (filters.country) params.append('country', filters.country);
+      if (filters.lat && filters.lng) {
+        params.append('lat', filters.lat.toString());
+        params.append('lng', filters.lng.toString());
+        if (filters.radius) params.append('radius', filters.radius.toString());
+      }
       
       // Add sorting
       switch (sortBy) {
@@ -136,9 +154,30 @@ export default function ProductsPage() {
       category: '',
       dateFrom: '',
       dateTo: '',
-      search: ''
+      search: '',
+      city: '',
+      state: '',
+      country: '',
+      lat: null,
+      lng: null,
+      radius: null,
     });
     fetchProducts();
+  };
+
+  const handleLocationSelect = (location: any) => {
+    setFilters(prev => ({
+      ...prev,
+      city: location.city || '',
+      state: location.state || '',
+      country: location.country || '',
+      lat: location.lat || null,
+      lng: location.lng || null,
+      radius: location.radius || null,
+    }));
+    setShowMapFilter(false);
+    // Trigger fetch after state update
+    setTimeout(() => fetchProducts(), 100);
   };
 
   return (
@@ -171,6 +210,21 @@ export default function ProductsPage() {
               </svg>
             </div>
             
+            {/* Map Filter Button */}
+            <button
+              onClick={() => setShowMapFilter(!showMapFilter)}
+              className="px-4 py-2 border rounded-lg hover:bg-gray-50 flex items-center gap-2 justify-center"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              Location
+              {(filters.city || filters.state || filters.country) && (
+                <span className="bg-green-600 text-white text-xs px-2 py-0.5 rounded-full">Active</span>
+              )}
+            </button>
+            
             {/* Filter Button */}
             <button
               onClick={() => setShowFilters(!showFilters)}
@@ -199,6 +253,16 @@ export default function ProductsPage() {
             </select>
           </div>
         </div>
+
+        {/* Location Map Filter */}
+        {showMapFilter && (
+          <div className="mb-6">
+            <LocationMapFilter
+              onLocationSelect={handleLocationSelect}
+              selectedLocation={filters}
+            />
+          </div>
+        )}
 
         {/* Advanced Filters Panel */}
         {showFilters && (
@@ -353,6 +417,16 @@ export default function ProductsPage() {
               <span className="px-3 py-2 bg-blue-100 text-blue-800 rounded-lg text-sm flex items-center gap-2">
                 📍 {filters.location}
                 <button onClick={() => handleFilterChange('location', '')} className="hover:text-blue-900">×</button>
+              </span>
+            )}
+            {(filters.city || filters.state || filters.country) && (
+              <span className="px-3 py-2 bg-green-100 text-green-800 rounded-lg text-sm flex items-center gap-2">
+                📍 {[filters.city, filters.state, filters.country].filter(Boolean).join(', ')}
+                {filters.radius && ` (${filters.radius}km)`}
+                <button onClick={() => {
+                  setFilters(prev => ({ ...prev, city: '', state: '', country: '', lat: null, lng: null, radius: null }));
+                  fetchProducts();
+                }} className="hover:text-green-900">×</button>
               </span>
             )}
           </div>

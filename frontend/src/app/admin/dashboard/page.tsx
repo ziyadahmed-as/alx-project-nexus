@@ -6,11 +6,17 @@ import { useAuthStore } from '@/store/authStore';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
 import Navbar from '@/components/Navbar';
+import CreateUserModal from '@/components/CreateUserModal';
+import ResetPasswordModal from '@/components/ResetPasswordModal';
 
 export default function AdminDashboard() {
   const { user, isAuthenticated } = useAuthStore();
   const [vendors, setVendors] = useState<any[]>([]);
-  const [stats, setStats] = useState({ total_vendors: 0, pending_vendors: 0, total_orders: 0 });
+  const [users, setUsers] = useState<any[]>([]);
+  const [stats, setStats] = useState({ total_vendors: 0, pending_vendors: 0, total_orders: 0, total_users: 0 });
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<{ id: number; username: string } | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -30,15 +36,27 @@ export default function AdminDashboard() {
       const vendorArray = Array.isArray(vendorData) ? vendorData : [];
       const pending = vendorArray.filter((v: any) => v.status === 'pending').length;
       
+      // Fetch users
+      const usersRes = await api.get('/auth/users/');
+      const userData = usersRes.data.results || usersRes.data;
+      const userArray = Array.isArray(userData) ? userData : [];
+      setUsers(userArray.slice(0, 5)); // Get latest 5 users
+      
       setStats({
         total_vendors: vendorArray.length,
         pending_vendors: pending,
-        total_orders: 0
+        total_orders: 0,
+        total_users: userArray.length
       });
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
       toast.error('Failed to load dashboard data');
     }
+  };
+
+  const handleResetPassword = (userId: number, username: string) => {
+    setSelectedUser({ id: userId, username });
+    setShowResetModal(true);
   };
 
   const handleVerifyVendor = async (vendorId: number, status: string) => {

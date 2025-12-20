@@ -48,6 +48,31 @@ export default function VendorDetailPage() {
     }
   };
 
+  const handleSuspend = async () => {
+    const reason = prompt('Please enter the reason for suspension:');
+    if (!reason) return;
+    
+    try {
+      await api.post(`/vendors/${params.id}/suspend/`, { reason });
+      toast.success('Vendor suspended successfully');
+      fetchVendorDetails();
+    } catch (error) {
+      toast.error('Failed to suspend vendor');
+    }
+  };
+
+  const handleActivate = async () => {
+    if (!confirm('Are you sure you want to activate this vendor?')) return;
+    
+    try {
+      await api.post(`/vendors/${params.id}/activate/`);
+      toast.success('Vendor activated successfully');
+      fetchVendorDetails();
+    } catch (error) {
+      toast.error('Failed to activate vendor');
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -248,15 +273,35 @@ export default function VendorDetailPage() {
               
               <div className="mb-4">
                 <label className="text-sm text-gray-600">Current Status</label>
-                <p className={`inline-block px-3 py-1 rounded-full text-sm font-medium mt-1 ${
-                  vendor.status === 'approved' ? 'bg-green-100 text-green-800' :
-                  vendor.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                  vendor.status === 'rejected' ? 'bg-red-100 text-red-800' :
-                  'bg-gray-100 text-gray-800'
-                }`}>
-                  {vendor.status.charAt(0).toUpperCase() + vendor.status.slice(1)}
-                </p>
+                <div className="flex flex-col gap-2 mt-1">
+                  <p className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
+                    vendor.status === 'approved' ? 'bg-green-100 text-green-800' :
+                    vendor.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                    vendor.status === 'suspended' ? 'bg-orange-100 text-orange-800' :
+                    vendor.status === 'rejected' ? 'bg-red-100 text-red-800' :
+                    'bg-gray-100 text-gray-800'
+                  }`}>
+                    {vendor.status.charAt(0).toUpperCase() + vendor.status.slice(1)}
+                  </p>
+                  {!vendor.is_active && (
+                    <p className="inline-block px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-800">
+                      Inactive
+                    </p>
+                  )}
+                </div>
               </div>
+
+              {vendor.status === 'suspended' && vendor.suspension_reason && (
+                <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                  <label className="text-sm font-medium text-orange-800">Suspension Reason</label>
+                  <p className="text-sm text-orange-700 mt-1">{vendor.suspension_reason}</p>
+                  {vendor.suspended_at && (
+                    <p className="text-xs text-orange-600 mt-1">
+                      Suspended on: {new Date(vendor.suspended_at).toLocaleDateString()}
+                    </p>
+                  )}
+                </div>
+              )}
 
               <div className="mb-4">
                 <label className="text-sm text-gray-600">Applied On</label>
@@ -298,21 +343,21 @@ export default function VendorDetailPage() {
                 </div>
               )}
 
-              {vendor.status === 'approved' && (
+              {vendor.status === 'approved' && vendor.is_active && (
                 <button
-                  onClick={() => handleVerify('suspended')}
+                  onClick={handleSuspend}
                   className="w-full bg-orange-600 text-white py-2 rounded-lg hover:bg-orange-700"
                 >
                   Suspend Vendor
                 </button>
               )}
 
-              {vendor.status === 'suspended' && (
+              {(vendor.status === 'suspended' || !vendor.is_active) && (
                 <button
-                  onClick={() => handleVerify('approved')}
+                  onClick={handleActivate}
                   className="w-full bg-green-600 text-white py-2 rounded-lg hover:bg-green-700"
                 >
-                  Reactivate Vendor
+                  Activate Vendor
                 </button>
               )}
             </div>

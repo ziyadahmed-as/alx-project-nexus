@@ -36,6 +36,29 @@ export default function CheckoutPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validate required fields
+    if (!formData.shipping_address.trim()) {
+      toast.error('Please enter your shipping address');
+      return;
+    }
+    
+    if (!formData.shipping_city.trim()) {
+      toast.error('Please enter your city');
+      return;
+    }
+    
+    if (!formData.shipping_postal_code.trim()) {
+      toast.error('Please enter your postal code');
+      return;
+    }
+    
+    if (items.length === 0) {
+      toast.error('Your cart is empty');
+      router.push('/cart');
+      return;
+    }
+    
     setLoading(true);
 
     try {
@@ -63,9 +86,37 @@ export default function CheckoutPage() {
       clearCart();
       router.push('/orders');
     } catch (error: any) {
-      const errorMsg = error.response?.data?.detail || 
-                      error.response?.data?.message ||
-                      'Failed to place order';
+      console.error('Full checkout error:', error);
+      console.error('Error response:', error.response?.data);
+      
+      // Extract detailed error message
+      let errorMsg = 'Failed to place order';
+      
+      if (error.response?.data) {
+        const data = error.response.data;
+        
+        // Check for specific field errors
+        if (typeof data === 'object') {
+          const errors = [];
+          for (const [field, messages] of Object.entries(data)) {
+            if (Array.isArray(messages)) {
+              errors.push(`${field}: ${messages.join(', ')}`);
+            } else if (typeof messages === 'string') {
+              errors.push(`${field}: ${messages}`);
+            }
+          }
+          if (errors.length > 0) {
+            errorMsg = errors.join('; ');
+          }
+        } else if (data.detail) {
+          errorMsg = data.detail;
+        } else if (data.message) {
+          errorMsg = data.message;
+        } else if (typeof data === 'string') {
+          errorMsg = data;
+        }
+      }
+      
       toast.error(errorMsg);
       console.error('Checkout error:', error);
     } finally {

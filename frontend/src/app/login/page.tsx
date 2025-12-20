@@ -21,7 +21,7 @@ export default function LoginPage() {
     try {
       const userData = await login(username, password);
       toast.success('Login successful!');
-      
+
       // Redirect based on user role
       if (userData.role === 'admin') {
         router.push('/admin/dashboard');
@@ -40,11 +40,11 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar />
-      
+
       <div className="container mx-auto px-4 py-12">
         <div className="max-w-md mx-auto bg-white rounded-lg shadow-md p-8">
           <h1 className="text-3xl font-bold mb-6 text-center">Login</h1>
-          
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium mb-2">Username</label>
@@ -56,7 +56,7 @@ export default function LoginPage() {
                 required
               />
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium mb-2">Password</label>
               <input
@@ -67,7 +67,16 @@ export default function LoginPage() {
                 required
               />
             </div>
-            
+
+            <div className="flex justify-end">
+              <Link
+                href="/password-reset"
+                className="text-sm text-primary hover:underline"
+              >
+                Forgot Password?
+              </Link>
+            </div>
+
             <button
               type="submit"
               disabled={loading}
@@ -76,7 +85,7 @@ export default function LoginPage() {
               {loading ? 'Logging in...' : 'Login'}
             </button>
           </form>
-          
+
           <p className="mt-4 text-center text-sm">
             Don't have an account?{' '}
             <Link href="/register" className="text-primary hover:underline">
